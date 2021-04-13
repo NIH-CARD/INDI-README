@@ -28,10 +28,14 @@ For each gene variant, we plan to engineer:
 
 1. [Genetics work performed](https://github.com/NIH-CARD/INDI-README/tree/main/INDI-genetics)
     1. Clinvar analyses INDI lines
+    2. Genetic risk score analysis of INDI lines
+    3. Genomic alteration analysis of INDI lines
 2. XXX
+   1. XXX
+   2. XXX
 3. XXX
-   1. Item 3a
-   1. Item 3b
+   1. XXX
+   2. XXX
 
 ## Contact details
 
