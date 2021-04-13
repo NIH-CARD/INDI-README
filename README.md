@@ -45,6 +45,9 @@ For more information or questions please email:
 - Michael Ward (INDI-PI)
 
 
+## Full INDI Team:
+
+XXX
 
 
 
