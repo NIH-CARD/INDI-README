@@ -2,7 +2,6 @@
 
 ## Brief summary
 
-```
 iPSC Neurodegenerative Disease Initiative
 Researchers have identified more than 50 regions of the genome (called loci) that contain variants that may increase risk for the disease. To develop effective treatments for Alzheimer’s and related dementias, we must identify how individual mutations impact cellular pathways and contribute to Alzheimer’s and related dementias pathology. However, this requires readily available, disease-relevant cellular models of Alzheimer’s and related dementias and phenotypic datasets of the effects of gene mutations on cellular pathways, which are not currently available in the field.
 
@@ -15,7 +14,7 @@ Homozygous clones for the disease-associated single nucleotide variant
 Reverent clones
 Gene knockout clones
 Halotag knock-in clones
-```
+
 
 ## Publications
 
