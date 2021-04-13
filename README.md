@@ -9,16 +9,16 @@ We will create a foundational repository of isogenic induced pluripotent stem ce
 
 For each gene variant, we plan to engineer:
 
-Heterozygous clones for the disease-associated single nucleotide variant
-Homozygous clones for the disease-associated single nucleotide variant
-Reverent clones
-Gene knockout clones
-Halotag knock-in clones
+- Heterozygous clones for the disease-associated single nucleotide variant
+- Homozygous clones for the disease-associated single nucleotide variant
+- Reverent clones
+- Gene knockout clones
+- Halotag knock-in clones
 
 
 ## Publications
 
-Ramos et al 2021 Neuron [here](https://pubmed.ncbi.nlm.nih.gov/33831364/)
+- Ramos et al 2021, Neuron [here](https://pubmed.ncbi.nlm.nih.gov/33831364/)
 
 ## Graphical overview
 
