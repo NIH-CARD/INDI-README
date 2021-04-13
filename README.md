@@ -26,13 +26,14 @@ For each gene variant, we plan to engineer:
 
 ## Overview of this code repo
 
-- Genetics work performed including
-  ⋅⋅* 
-- XXXX
-- XXXX
-- XXXX
+1. Genetics work performed
+    1. Clinvar analyses INDI lines
+2. XXX
+3. XXX
+   1. Item 3a
+   1. Item 3b
 
-## contact details
+## Contact details
 
 For more information or questions please email:
 - Caroline Pantazis (Project manager)
