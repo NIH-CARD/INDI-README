@@ -27,7 +27,7 @@ For each gene variant, we plan to engineer:
 ## Overview of this code repo
 
 - Genetics work performed including
-⋅⋅* 
+  ⋅⋅* 
 - XXXX
 - XXXX
 - XXXX
@@ -35,7 +35,7 @@ For each gene variant, we plan to engineer:
 ## contact details
 
 For more information or questions please email:
-- Caroline Pantazis (program manager)
+- Caroline Pantazis (Project manager)
 - Mark Cookson (INDI-PI)
 - Michael Ward (INDI-PI)
 
