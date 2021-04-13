@@ -26,7 +26,7 @@ For each gene variant, we plan to engineer:
 
 ## Overview of this code repo
 
-1. Genetics work performed
+1. [Genetics work performed](https://github.com/NIH-CARD/INDI-README/tree/main/INDI-genetics)
     1. Clinvar analyses INDI lines
 2. XXX
 3. XXX
