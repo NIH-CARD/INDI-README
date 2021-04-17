@@ -5,15 +5,15 @@
 iPSC Neurodegenerative Disease Initiative
 Researchers have identified more than 50 regions of the genome (called loci) that contain variants that may increase risk for the disease. To develop effective treatments for Alzheimer’s and related dementias, we must identify how individual mutations impact cellular pathways and contribute to Alzheimer’s and related dementias pathology. However, this requires readily available, disease-relevant cellular models of Alzheimer’s and related dementias and phenotypic datasets of the effects of gene mutations on cellular pathways, which are not currently available in the field.
 
-We will create a foundational repository of isogenic induced pluripotent stem cell (iPSC) lines using CRISPR/Cas9-based genetic engineering. Our target goals are 132 variants across 72 AD/ADRD genes, 8 of which are known AD-related genes, 15 are genes linked to Dementia with Lewy Bodies/Parkinson’s Disease, 28 genes are associated with Frontotemporal Dementia/Amyotrophic Lateral Sclerosis, and 21 are genes associated with other neurodegenerative disorders.
+We will create a foundational repository of isogenic induced pluripotent stem cell (iPSC) lines using CRISPR/Cas9-based genetic engineering. Our target goals are 134 variants across 73 AD/ADRD genes, 8 of which are known AD-related genes, 15 are genes linked to Dementia with Lewy Bodies/Parkinson’s Disease, 29 genes are associated with Frontotemporal Dementia/Amyotrophic Lateral Sclerosis, and 21 are genes associated with other neurodegenerative disorders.
 
 For each gene variant, we plan to engineer:
 
-- Heterozygous clones for the disease-associated single nucleotide variant
-- Homozygous clones for the disease-associated single nucleotide variant
-- Reverent clones
+- Heterozygous clones for the disease-associated single nucleotide variant (SNV)
+- Homozygous clones for the disease-associated SNV
+- Revertant clones
 - Gene knockout clones
-- Halotag knock-in clones
+- Halotag SNV and gene knock-in clones
 
 
 ## Publications
