@@ -35,7 +35,9 @@ these are files from Dan, note general plink files + NOTE has to be clustered wi
 
 minor follow-up change => update the names of the plink files....
 
-!!!!
+module load plink
+plink --bfile ibx --update-ids UPDATE_IBX_names.txt --make-bed --out ibx_new_name
+
 
 - ibx_variant_metrics.txt
 Massive file containing:
@@ -101,7 +103,7 @@ Variants to investigate are:
 cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/plink/
 
 module load plink
-plink --bfile ibx --extract snps_of_interest_first_data.txt --recodeA --out VARIANT_investigation
+plink --bfile ibx_new_name --extract snps_of_interest_first_data.txt --recodeA --out VARIANT_investigation
 
 
 
@@ -112,7 +114,7 @@ mkdir comparison_with_WGS
 cd comparison_with_WGS
 
 module load plink
-plink --bfile ../plink/ibx --bmerge ../../KOLF_GENOME/KOLF_PLINK --make-bed --out test
+plink --bfile ../plink/ibx_new_name --bmerge ../../KOLF_GENOME/KOLF_PLINK --make-bed --out test
 
 -flip etc...
 
