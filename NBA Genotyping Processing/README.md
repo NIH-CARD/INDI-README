@@ -28,7 +28,7 @@ F4SEttehadieh_P1_Genotyping_Report.txt => full report
 F4SEttehadieh_P1_QC_Report.xlsx => QC metrics
 Raw_Data/ => with 192 .idats 
 
-- plink files:
+- plink files => in folder plink
 ibx.bed  ibx.bim	ibx.fam  ibx.log
 
 these are files from Dan, note general plink files + NOTE has to be clustered with other data since the Illumina algorithm needs some more diversity
@@ -46,9 +46,6 @@ For all samples...
 
 ```
 
-
-
-
 ### KOLF genome
 
 ```
@@ -60,6 +57,31 @@ bcftools norm -m- consensus_variants_3common.vcf > consensus_variants_3common_sp
 plink2 --vcf consensus_variants_3common_split_multi.vcf --make-bed --out KOLF_PLINK
 
 ```
+
+
+## Two analyses strategies
+### 1. Comparison with WGS
+### 2. Plot per sample
+
+
+## Lets start with 1. Comparison with WGS
+
+```
+mkdir comparison_with_WGS
+cd comparison_with_WGS
+
+module load plink
+plink --bfile ../plink/ibx --bmerge ../../KOLF_GENOME/KOLF_PLINK --make-bed --out test
+
+-flip etc...
+
+```
+
+
+
+
+
+
 
 
 
