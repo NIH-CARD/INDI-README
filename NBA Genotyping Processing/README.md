@@ -55,12 +55,21 @@ For all samples...
 ### KOLF genome
 
 ```
+# option 1 (from Lirong)
+cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/KOLF_GENOME
+
 module load plink/2.3-alpha
 module load bcftools
 # split multiallelics, but wonder why they are even in there?
 bcftools norm -m- consensus_variants_3common.vcf > consensus_variants_3common_split_multi.vcf
 
 plink2 --vcf consensus_variants_3common_split_multi.vcf --make-bed --out KOLF_PLINK
+
+# option 2 (older version used in phase 2 combined with 8 other genomes)
+
+cd /data/CARD/projects/INDI_genotypes/PHASE1_pre_KOLF_selection/WGS
+INDI_WGS_RS_only.*
+
 
 ```
 
@@ -105,13 +114,50 @@ cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_rele
 module load plink
 plink --bfile ibx_new_name --extract snps_of_interest_first_data.txt --recodeA --out VARIANT_investigation
 
-
+```
 
 ## 2. Comparison with WGS
 
 ```
 mkdir comparison_with_WGS
 cd comparison_with_WGS
+
+# first create dummy WGS file...
+
+cd /data/CARD/projects/INDI_genotypes/PHASE1_pre_KOLF_selection/WGS
+head -1 INDI_WGS_21_RS_only.fam  | cut -d " " -f 1,2 > KOLF_sample_name.txt
+
+# make sample dummy file
+for chnum in {1..95};
+  do
+  echo _"$chnum"X >> phase2_sampleIDs.txt
+done
+
+# NOW this times 95.... this will create multiple exact copies of the WGS data... so we can compare each clone with the same WGS data
+module load plink
+cat phase2_sampleIDs.txt | while read line
+  do
+  plink --bfile INDI_WGS_21_RS_only --make-bed --keep KOLF_sample_name.txt \
+  --extract ../../PHASE2_post_KOLF_selection/first_data_release_June_2021/plink/ibx_new_name.bim  \
+  --out INDI_WGS_NBA"$line" --keep-allele-order
+done
+
+# update sample names
+cat phase2_sampleIDs.txt  | while read line
+do 
+   grep "$line" SAMPLE_IDv2.txt > update_names.txt
+   plink --bfile INDI_WGS_NBA"$line" --make-bed --extract ../PLINK/GENO.bim \
+   --update-ids update_names.txt --out INDI_WGS_NEUROCHIP_to_merge"$line"
+done
+
+# make merge list
+ls | grep "X.fam" | sed 's/.fam//g' | grep merge > merge_list.txt
+plink --merge-list merge_list.txt --make-bed --out try1
+# 254303 variants and 189 people pass filters and QC.
+
+
+
+
 
 module load plink
 plink --bfile ../plink/ibx_new_name --bmerge ../../KOLF_GENOME/KOLF_PLINK --make-bed --out test
