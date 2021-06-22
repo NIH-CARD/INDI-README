@@ -56,10 +56,12 @@ python cluster_buster_prototype_cli.py \
 
 ### example outputs
 
-![alt text](http://url/to/img.png)
+
+![alt text](https://github.com/NIH-CARD/INDI-README/blob/main/NBA%20Genotyping%20Processing/17:44101427-C-T.png)
 
 
-![alt text](http://url/to/img.png)
+
+![alt text](https://github.com/NIH-CARD/INDI-README/blob/main/NBA%20Genotyping%20Processing/exm505578.png)
 
 
 
