@@ -48,11 +48,25 @@ just a random output folder where ever you want the output to go to
 
 ```
 cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/cluster_buster/
-
+module load python/3.7
 python cluster_buster_prototype_cli.py \
 --report_file ../first_data_release_June_2021/F4SEttehadieh_P1_Genotyping_Report.txt  \
 --snp_file snps_of_interest_first_data.txt --out_file test_snps/
 ```
+
+### example outputs
+
+![alt text](http://url/to/img.png)
+
+
+![alt text](http://url/to/img.png)
+
+
+
+
+
+
+
 
 
 
