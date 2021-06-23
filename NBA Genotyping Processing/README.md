@@ -36,7 +36,9 @@ these are files from Dan, note general plink files + NOTE has to be clustered wi
 minor follow-up change => update the names of the plink files....
 
 module load plink
-plink --bfile ibx --update-ids UPDATE_IBX_names.txt --make-bed --out ibx_new_name
+sed -e 's/FUS_R495\*_/FUS_R495X_/g' UPDATE_IBX_names.txt > UPDATE_IBX_namesv2.txt
+
+plink --bfile ibx --update-ids UPDATE_IBX_namesv2.txt --make-bed --out ibx_new_name
 
 
 - ibx_variant_metrics.txt
@@ -128,12 +130,12 @@ cd /data/CARD/projects/INDI_genotypes/PHASE1_pre_KOLF_selection/WGS
 head -1 INDI_WGS_21_RS_only.fam  | cut -d " " -f 1,2 > KOLF_sample_name.txt
 
 # make sample dummy file
-for chnum in {1..95};
-  do
-  echo _"$chnum"X >> phase2_sampleIDs.txt
-done
+cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/plink
+cut -d " " -f 1 ibx_new_name.fam | grep -v "DELETE" > /data/CARD/projects/INDI_genotypes/PHASE1_pre_KOLF_selection/WGS/phase2_sampleIDs.txt
 
 # NOW this times 95.... this will create multiple exact copies of the WGS data... so we can compare each clone with the same WGS data
+cd /data/CARD/projects/INDI_genotypes/PHASE1_pre_KOLF_selection/WGS
+
 module load plink
 cat phase2_sampleIDs.txt | while read line
   do
@@ -142,27 +144,92 @@ cat phase2_sampleIDs.txt | while read line
   --out INDI_WGS_NBA"$line" --keep-allele-order
 done
 
+# create update names file
+scp phase2_sampleIDs.txt phase2_sampleIDs2.txt
+printf "GT19-KOLF2.1 %.0s\n" {1..95} > KOLF_name1.txt
+printf "GT19-KOLF2.1 %.0s\n" {1..95} > KOLF_name2.txt
+paste KOLF_name1.txt KOLF_name2.txt phase2_sampleIDs.txt phase2_sampleIDs2.txt > update_names_phase2.txt
+
 # update sample names
 cat phase2_sampleIDs.txt  | while read line
 do 
-   grep "$line" SAMPLE_IDv2.txt > update_names.txt
-   plink --bfile INDI_WGS_NBA"$line" --make-bed --extract ../PLINK/GENO.bim \
-   --update-ids update_names.txt --out INDI_WGS_NEUROCHIP_to_merge"$line"
+   grep "$line" update_names_phase2.txt > update_names.txt
+   plink --bfile INDI_WGS_NBA"$line" --make-bed \
+   --extract ../../PHASE2_post_KOLF_selection/first_data_release_June_2021/plink/ibx_new_name.bim \
+   --update-ids update_names.txt --out INDI_WGS_NBA_to_merge"$line"
 done
 
+
 # make merge list
-ls | grep "X.fam" | sed 's/.fam//g' | grep merge > merge_list.txt
-plink --merge-list merge_list.txt --make-bed --out try1
-# 254303 variants and 189 people pass filters and QC.
+ls | grep "INDI_WGS_NBA_to_merge" | grep fam | sed 's/.fam//g' | grep merge > merge_list_phase2.txt
+plink --merge-list merge_list_phase2.txt --make-bed --out WGS_data_format_OK
+# 483680 variants and 95 people pass filters and QC.
+
+scp WGS_data_format_OK.*  /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/plink
+
+----- GENOTYPES below
+
+cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/plink
+
+grep DELETE ibx_new_name.fam | cut -d " " -f 1,2 > remove.txt
+
+plink --bfile ibx_new_name --make-bed --out ibx_new_name_v2 --remove remove.txt \
+--extract WGS_data_format_OK.bim
+
+# 483680 variants and 95 people pass filters and QC.
+
+----- Merging WGS with GENOTYPES below
+
+# Plotting chromosomes to assess not matching regions
+
+### first make sure sample IDs are the same because then if you merge them plink actually compares them
+plink --bfile WGS_data_format_OK --keep ibx_new_name_v2.fam --make-bed --out WGS_to_merge
+plink --bfile ibx_new_name_v2 --keep WGS_data_format_OK.fam --make-bed --out GENO_to_merge
+
+# Then start merging with WGS
+plink --bfile GENO_to_merge --bmerge WGS_to_merge --out merge1 --make-bed
+# flip bad alleles not matching to WGS
+plink --bfile GENO_to_merge --flip merge1-merge.missnp --make-bed --out GENO_to_merge2 
+# merge again to check allele for allele flips
+plink --bfile GENO_to_merge2 --bmerge WGS_to_merge --out merge2 --merge-mode 6 --make-bed
+# remove variants that are bad + only keep samples of which WGS is present
+plink --bfile GENO_to_merge2 --exclude merge2.missnp --out GENO_to_merge3 --make-bed
+# make sure all samples are what they are supposed to be and all sample switches are corrected...
+# FIRST PASS
+plink --bfile GENO_to_merge3 --bmerge WGS_to_merge --out merge_NBA_INDI --merge-mode 7 --make-bed
+# 483678 variants and 95 people pass filters and QC.
+# this spits out this file -> merge_NBA_INDI.diff
+# with header NEW = GENOMES OLD = NEUROCHIP
+# SNP                  FID                  IID      NEW      OLD 
+# then remove SNPs that are wrong in all lines
+# first remove double space because plink has the inconvenient output with double spaces
+sed -i 's/  / /g' merge_NBA_INDI.diff # need to do this x5
+## this is the file with the times each variant is error
+cut -d " " -f 2 merge_NBA_INDI.diff | sort | uniq -c | sort -nk1 > variant_failure_count.txt
+# now create variant list to exclude because of too many mismatches and likely a problem variant
+# set here at ~31 which is 33% based on N=95
+awk '{if ($1 > 31) print $2;}' variant_failure_count.txt > variant_failure_count_EXCLUDE.txt
+## this is the file with the times each SAMPLE is error
+cut -d " " -f 3 merge_NBA_INDI.diff | sort | uniq -c | sort -nk1 > INDI_failure_count.txt
+
+# SECOND PASS
+# remove bad variants + samples with massive error rates if present...
+plink --bfile GENO_to_merge3 --exclude variant_failure_count_EXCLUDE.txt --out GENO_to_merge4 --make-bed
+# run merge again
+plink --bfile GENO_to_merge4 --bmerge WGS_to_merge --out merge_NBA_INDI_v2 --merge-mode 7 --make-bed
+sed -i 's/  / /g' merge_NeuroChip_INDI_v2.diff # need to do this x5
+
+# Then Running comparison plots for all chromosome based on the merge_NBA_INDI_v2.diff file
+
+module load R
+for chrnum in {1..23};
+do
+	Rscript --vanilla plot_differences_between_WGS_and_chip.R $chrnum
+done
 
 
+# DONE
 
-
-
-module load plink
-plink --bfile ../plink/ibx_new_name --bmerge ../../KOLF_GENOME/KOLF_PLINK --make-bed --out test
-
--flip etc...
 
 ```
 
