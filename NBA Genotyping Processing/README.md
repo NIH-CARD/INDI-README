@@ -237,8 +237,87 @@ done
 
 ## 3. Plot per sample
 
+```
+----- Step 1 -----
+# prep data in correct format
+
+cd /data/CARD/PD/ibx_data/gtc/
+
+scp ibx_variant_metrics.txt /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/CNV_data/
+
+cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/CNV_data/
+
+header of file:
+CHROM	POS	ID	REF	ALT	variable	metrics	GT	GQ	BAF	LRR
+
+# cut out sampleIDs
+cut -f 6 ibx_variant_metrics.txt | sort -u > unqiue_samples.txt
+grep -v "variable" unqiue_samples.txt > unqiue_samplesv2.txt
+
+# extract per sample data
+cat unqiue_samplesv2.txt  | while read line
+do 
+   grep "$line" ibx_variant_metrics.txt > $line.txt
+done
+
+# add header...
+head -1 ibx_variant_metrics.txt > header.txt
+cat unqiue_samplesv2.txt  | while read line
+do 
+   cat header.txt $line.txt > $line.header.txt
+done
+
+# update sample names...
+
+sh UPDATE_IBX_names_CNV.sh
+
+# make a set of high quality variants
+cd /data/CARD/PD/ibx_data/
+cut -f 2,6 F4SEttehadieh_P1_Genotyping_Report.txt | awk '$2 > 0.8' | cut -f 1 \
+> /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/CNV_data/high_qual_NBA_variants_0point8_or_higher.txt 
+# N= 1,451,932
+cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/CNV_data/
+
+module load R
+R
+require("dplyr")
+highqual <- read.table("high_qual_NBA_variants_0point8_or_higher.txt",header=T)
+bim <- read.table("../plink/ibx_new_name.bim",header=F)
+MM <- merge(bim, highqual, by.x="V2", by.y="Name")
+MM$V3 <- NULL
+MM$V5 <- NULL
+MM$V6 <- NULL
+names(MM)[1] <- "snpName"
+names(MM)[2] <- "chromosome"
+names(MM)[3] <- "position"
+newdata <- MM[order(MM$chromosome, MM$position),]
+newdata2 <- subset(newdata, chromosome > 0 | position > 0)
+newdata2$snpID <- seq.int(nrow(newdata2)) 
+final <- newdata2[, c(4, 1, 2, 3)]
+head(final)
+# remove a couple other problematic variants
+# grep "\.\," ANG_K41I_A04_17_D01.csv | cut -d "," -f 4 > problem_snps.txt
+problem <- read.table("problem_snps.txt",header=F)
+names(problem)[1] <- "snpName"
+finalv2 <- anti_join(final, problem, by=c("snpName"))
+write.table(finalv2, file="anno_file_NBA.txt",quote=F,row.names=F,sep="\t")
 
 
+```
 
+```
+----- Step 2 -----
 
+# DONE and ready for plot per chip
+Need files
 
+plot_per_chip.R => this is the R code that does the plotting
+anno_file_NBA.txt => this is the annotation file needed for plotting but filtered for high quality variants
+scan_file_to_use.txt => this is the "scan" file needed for plotting
+scan_file.txt => this is the "scan" file needed for plotting
+
+# how to start for one sample
+module load R/3.6.0
+Rscript --vanilla plot_per_chip.R ANG_K41I_A04_17_D01
+
+```
