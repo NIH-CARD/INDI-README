@@ -290,18 +290,25 @@ MM$V6 <- NULL
 names(MM)[1] <- "snpName"
 names(MM)[2] <- "chromosome"
 names(MM)[3] <- "position"
-newdata <- MM[order(MM$chromosome, MM$position),]
-newdata2 <- subset(newdata, chromosome > 0 | position > 0)
-newdata2$snpID <- seq.int(nrow(newdata2)) 
-final <- newdata2[, c(4, 1, 2, 3)]
-head(final)
 # remove a couple other problematic variants
 # grep "\.\," ANG_K41I_A04_17_D01.csv | cut -d "," -f 4 > problem_snps.txt
 problem <- read.table("problem_snps.txt",header=F)
 names(problem)[1] <- "snpName"
-finalv2 <- anti_join(final, problem, by=c("snpName"))
-write.table(finalv2, file="anno_file_NBA.txt",quote=F,row.names=F,sep="\t")
-
+MM2 <- anti_join(MM, problem, by=c("snpName"))
+# make sure all variants from CNV file are in there...
+CNV_file <- read.csv("ANG_K41I_A04_17_D01.csv",header=T)
+CNV_file_short <- CNV_file[c(1,2,4)]
+CNV_file_short$chromosome <- NULL
+CNV_file_short$position <- NULL
+MM3 <- merge(MM2, CNV_file_short, by.x="snpName", by.y="snpName")
+# sort and add row name
+newdata <- MM3[order(MM3$chromosome, MM3$position),]
+newdata2 <- subset(newdata, chromosome > 0 | position > 0)
+newdata2$snpID <- seq.int(nrow(newdata2)) 
+final <- newdata2[, c(4, 1, 2, 3)]
+head(final)
+# save...
+write.table(final, file="anno_file_NBA.txt",quote=F,row.names=F,sep="\t")
 
 ```
 
@@ -317,7 +324,22 @@ scan_file_to_use.txt => this is the "scan" file needed for plotting
 scan_file.txt => this is the "scan" file needed for plotting
 
 # how to start for one sample
-module load R/3.6.0
+module load R/3.6.1
 Rscript --vanilla plot_per_chip.R ANG_K41I_A04_17_D01
+
+# or to run all them all...
+## make sample file
+cut -d " " -f 3 UPDATE_IBX_names_CNV.sh | sed -e 's/.txt//g' > short_CNV_files_plot.txt
+
+#!/bin/bash
+# sbatch --cpus-per-task=20 --mem=240g --mail-type=END --time=21:00:00 RUN_DMC_ALL.sh
+module load plink
+module load R/3.6.1
+# normal
+cat short_CNV_files_plot.txt  | while read line
+do 
+	Rscript --vanilla plot_per_chip.R $line
+done
+
 
 ```
