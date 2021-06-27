@@ -291,8 +291,9 @@ names(MM)[1] <- "snpName"
 names(MM)[2] <- "chromosome"
 names(MM)[3] <- "position"
 # remove a couple other problematic variants
-# grep "\.\," ANG_K41I_A04_17_D01.csv | cut -d "," -f 4 > problem_snps.txt
-problem <- read.table("problem_snps.txt",header=F)
+# grep "\.\," *.csv > PROBLEM_VARIANTS.txt
+# cut -d "," -f 4 PROBLEM_VARIANTS.txt | sort -u > problem_snps_v2.txt
+problem <- read.table("problem_snps_v2.txt",header=F)
 names(problem)[1] <- "snpName"
 MM2 <- anti_join(MM, problem, by=c("snpName"))
 # make sure all variants from CNV file are in there...
@@ -308,7 +309,7 @@ newdata2$snpID <- seq.int(nrow(newdata2))
 final <- newdata2[, c(4, 1, 2, 3)]
 head(final)
 # save...
-write.table(final, file="anno_file_NBA.txt",quote=F,row.names=F,sep="\t")
+write.table(final, file="anno_file_NBA_v2.txt",quote=F,row.names=F,sep="\t")
 
 ```
 
