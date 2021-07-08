@@ -344,3 +344,178 @@ done
 
 
 ```
+
+
+## 4. Plot per gene of interest
+
+```
+
+cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/CNV_data/
+
+
+SNCB example
+location: 5:176048219
+
+ls | grep SNCB | grep csv > SNCB_list.txt
+
+cat SNCB_list.txt  | while read line
+do 
+   awk -F, '$1 == 5' $line | awk -F, '$2 > 175998218' | awk -F, '$2 < 176098218' > short.$line.SNCB.txt
+done
+# note 176048218 is mutation basepair
+
+mkdir SNCB
+mv short.SNCB_P123H_* SNCB/
+cd SNCB
+# header = chromosome,position,snpID,snpName,Sample_ID,Allele1,Allele2,BAlleleFreq,LogRRatio
+
+module load R
+R
+SNCB_P123H_B08_17_E01 <- read.csv("short.SNCB_P123H_B08_17_E01.csv.SNCB.txt",header=F)
+SNCB_P123H_E08_17_E07 <- read.csv("short.SNCB_P123H_E08_17_E07.csv.SNCB.txt",header=F)
+SNCB_P123H_C08_17_E02 <- read.csv("short.SNCB_P123H_C08_17_E02.csv.SNCB.txt",header=F)
+SNCB_P123H_F04_17_E08 <- read.csv("short.SNCB_P123H_F04_17_E08.csv.SNCB.txt",header=F)
+SNCB_P123H_C09_17_E03 <- read.csv("short.SNCB_P123H_C09_17_E03.csv.SNCB.txt",header=F)
+SNCB_P123H_F10_17_E09 <- read.csv("short.SNCB_P123H_F10_17_E09.csv.SNCB.txt",header=F)
+SNCB_P123H_D11_17_E04 <- read.csv("short.SNCB_P123H_D11_17_E04.csv.SNCB.txt",header=F)
+SNCB_P123H_G01_17_E10 <- read.csv("short.SNCB_P123H_G01_17_E10.csv.SNCB.txt",header=F)
+SNCB_P123H_E01_17_E05 <- read.csv("short.SNCB_P123H_E01_17_E05.csv.SNCB.txt",header=F)
+SNCB_P123H_G07_17_E11 <- read.csv("short.SNCB_P123H_G07_17_E11.csv.SNCB.txt",header=F)
+SNCB_P123H_E06_17_E06 <- read.csv("short.SNCB_P123H_E06_17_E06.csv.SNCB.txt",header=F)
+SNCB_P123H_H11_17_E12 <- read.csv("short.SNCB_P123H_H11_17_E12.csv.SNCB.txt",header=F)
+
+# now plot BAF
+options(scipen=20)
+pdf("BAF_SNCB.pdf",height=24, width=24)
+par(mfrow=c(6,2))
+plot(SNCB_P123H_B08_17_E01$V2,SNCB_P123H_B08_17_E01$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_B08_17_E01")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+plot(SNCB_P123H_E08_17_E07$V2,SNCB_P123H_E08_17_E07$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_E08_17_E07")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+plot(SNCB_P123H_C08_17_E02$V2,SNCB_P123H_C08_17_E02$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_C08_17_E02")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+plot(SNCB_P123H_F04_17_E08$V2,SNCB_P123H_F04_17_E08$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_F04_17_E08")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+plot(SNCB_P123H_C09_17_E03$V2,SNCB_P123H_C09_17_E03$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_C09_17_E03")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+plot(SNCB_P123H_F10_17_E09$V2,SNCB_P123H_F10_17_E09$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_F10_17_E09")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+plot(SNCB_P123H_D11_17_E04$V2,SNCB_P123H_D11_17_E04$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_D11_17_E04")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+plot(SNCB_P123H_G01_17_E10$V2,SNCB_P123H_G01_17_E10$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_G01_17_E10")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+plot(SNCB_P123H_E01_17_E05$V2,SNCB_P123H_E01_17_E05$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_E01_17_E05")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+plot(SNCB_P123H_G07_17_E11$V2,SNCB_P123H_G07_17_E11$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_G07_17_E11")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+plot(SNCB_P123H_E06_17_E06$V2,SNCB_P123H_E06_17_E06$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_E06_17_E06")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+plot(SNCB_P123H_H11_17_E12$V2,SNCB_P123H_H11_17_E12$V8,pch=20,ylab="B allele frequency",xlab="CHR 5 basepair",main="SNCB_P123H_H11_17_E12")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0.66, col="blue")
+abline(h=0.33, col="blue")
+abline(h=0.5, col="blue", lwd = 3)
+grid()
+dev.off()
+
+
+# now plot LRR
+options(scipen=20)
+pdf("LRR_SNCB.pdf",height=24, width=24)
+par(mfrow=c(6,2))
+plot(SNCB_P123H_B08_17_E01$V2,SNCB_P123H_B08_17_E01$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_B08_17_E01")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+plot(SNCB_P123H_E08_17_E07$V2,SNCB_P123H_E08_17_E07$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_E08_17_E07")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+plot(SNCB_P123H_C08_17_E02$V2,SNCB_P123H_C08_17_E02$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_C08_17_E02")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+plot(SNCB_P123H_F04_17_E08$V2,SNCB_P123H_F04_17_E08$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_F04_17_E08")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+plot(SNCB_P123H_C09_17_E03$V2,SNCB_P123H_C09_17_E03$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_C09_17_E03")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+plot(SNCB_P123H_F10_17_E09$V2,SNCB_P123H_F10_17_E09$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_F10_17_E09")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+plot(SNCB_P123H_D11_17_E04$V2,SNCB_P123H_D11_17_E04$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_D11_17_E04")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+plot(SNCB_P123H_G01_17_E10$V2,SNCB_P123H_G01_17_E10$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_G01_17_E10")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+plot(SNCB_P123H_E01_17_E05$V2,SNCB_P123H_E01_17_E05$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_E01_17_E05")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+plot(SNCB_P123H_G07_17_E11$V2,SNCB_P123H_G07_17_E11$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_G07_17_E11")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+plot(SNCB_P123H_E06_17_E06$V2,SNCB_P123H_E06_17_E06$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_E06_17_E06")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+plot(SNCB_P123H_H11_17_E12$V2,SNCB_P123H_H11_17_E12$V9,pch=20,ylab="Log R ratio",xlab="CHR 5 basepair",main="SNCB_P123H_H11_17_E12")
+rect(xleft=176048218,xright = 176048219,ybottom=par("usr")[3], ytop=par("usr")[4], density=10, col = "blue")
+abline(h=0, col="blue")
+grid()
+dev.off()
+
+
+
