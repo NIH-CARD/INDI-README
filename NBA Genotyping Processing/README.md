@@ -176,9 +176,9 @@ head -1 INDI_WGS_21_RS_only.fam  | cut -d " " -f 1,2 > KOLF_sample_name.txt
 
 # make sample dummy file
 cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/plink
-cut -d " " -f 1 ibx_new_name.fam | grep -v "DELETE" > /data/CARD/projects/INDI_genotypes/PHASE1_pre_KOLF_selection/WGS/phase2_sampleIDs.txt
+cut -d " " -f 2 ibx_new_name.fam | grep -v 2048424 > /data/CARD/projects/INDI_genotypes/PHASE1_pre_KOLF_selection/WGS/phase2_sampleIDs.txt
 
-# NOW this times 95.... this will create multiple exact copies of the WGS data... so we can compare each clone with the same WGS data
+# NOW this times 284.... this will create multiple exact copies of the WGS data... so we can compare each clone with the same WGS data
 cd /data/CARD/projects/INDI_genotypes/PHASE1_pre_KOLF_selection/WGS
 
 module load plink
@@ -191,8 +191,8 @@ done
 
 # create update names file
 scp phase2_sampleIDs.txt phase2_sampleIDs2.txt
-printf "GT19-KOLF2.1 %.0s\n" {1..95} > KOLF_name1.txt
-printf "GT19-KOLF2.1 %.0s\n" {1..95} > KOLF_name2.txt
+printf "GT19-KOLF2.1 %.0s\n" {1..284} > KOLF_name1.txt
+printf "GT19-KOLF2.1 %.0s\n" {1..284} > KOLF_name2.txt
 paste KOLF_name1.txt KOLF_name2.txt phase2_sampleIDs.txt phase2_sampleIDs2.txt > update_names_phase2.txt
 
 # update sample names
@@ -206,9 +206,9 @@ done
 
 
 # make merge list
-ls | grep "INDI_WGS_NBA_to_merge" | grep fam | sed 's/.fam//g' | grep merge > merge_list_phase2.txt
+ls -lhS | grep "INDI_WGS_NBA_to_merge" | grep Jul | grep fam | cut -d " " -f 12 | sed 's/.fam//g' | grep merge > merge_list_phase2.txt
 plink --merge-list merge_list_phase2.txt --make-bed --out WGS_data_format_OK
-# 483680 variants and 95 people pass filters and QC.
+# 284 people, 483680 variants
 
 scp WGS_data_format_OK.*  /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/plink
 
@@ -216,12 +216,18 @@ scp WGS_data_format_OK.*  /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_se
 
 cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/plink
 
-grep DELETE ibx_new_name.fam | cut -d " " -f 1,2 > remove.txt
+grep 2048424 ibx_new_name.fam | cut -d " " -f 1,2 > remove.txt
 
 plink --bfile ibx_new_name --make-bed --out ibx_new_name_v2 --remove remove.txt \
---extract WGS_data_format_OK.bim
+--extract WGS_data_format_OK.bim --mind 0.05
 
-# 483680 variants and 95 people pass filters and QC.
+# 483680 variants and 280 people pass filters and QC.
+
+# 4 samples removed...
+ATP13A2_T517I_A01       ATP13A2_T517I_A01
+APOE_C156R_A09  APOE_C156R_A09
+PSEN2_A85V_A03  PSEN2_A85V_A03
+PSEN2_A85V_A05  PSEN2_A85V_A05
 
 ----- Merging WGS with GENOTYPES below
 
@@ -242,18 +248,22 @@ plink --bfile GENO_to_merge2 --exclude merge2.missnp --out GENO_to_merge3 --make
 # make sure all samples are what they are supposed to be and all sample switches are corrected...
 # FIRST PASS
 plink --bfile GENO_to_merge3 --bmerge WGS_to_merge --out merge_NBA_INDI --merge-mode 7 --make-bed
-# 483678 variants and 95 people pass filters and QC.
+# 483678 variants and 284 people pass filters and QC.
 # this spits out this file -> merge_NBA_INDI.diff
 # with header NEW = GENOMES OLD = NEUROCHIP
 # SNP                  FID                  IID      NEW      OLD 
 # then remove SNPs that are wrong in all lines
 # first remove double space because plink has the inconvenient output with double spaces
 sed -i 's/  / /g' merge_NBA_INDI.diff # need to do this x5
+sed -i 's/  / /g' merge_NBA_INDI.diff # need to do this x5
+sed -i 's/  / /g' merge_NBA_INDI.diff # need to do this x5
+sed -i 's/  / /g' merge_NBA_INDI.diff # need to do this x5
+sed -i 's/  / /g' merge_NBA_INDI.diff # need to do this x5
 ## this is the file with the times each variant is error
 cut -d " " -f 2 merge_NBA_INDI.diff | sort | uniq -c | sort -nk1 > variant_failure_count.txt
 # now create variant list to exclude because of too many mismatches and likely a problem variant
-# set here at ~31 which is 33% based on N=95
-awk '{if ($1 > 31) print $2;}' variant_failure_count.txt > variant_failure_count_EXCLUDE.txt
+# set here at ~94 which is 33% based on N=284
+awk '{if ($1 > 94) print $2;}' variant_failure_count.txt > variant_failure_count_EXCLUDE.txt
 ## this is the file with the times each SAMPLE is error
 cut -d " " -f 3 merge_NBA_INDI.diff | sort | uniq -c | sort -nk1 > INDI_failure_count.txt
 
@@ -262,7 +272,11 @@ cut -d " " -f 3 merge_NBA_INDI.diff | sort | uniq -c | sort -nk1 > INDI_failure_
 plink --bfile GENO_to_merge3 --exclude variant_failure_count_EXCLUDE.txt --out GENO_to_merge4 --make-bed
 # run merge again
 plink --bfile GENO_to_merge4 --bmerge WGS_to_merge --out merge_NBA_INDI_v2 --merge-mode 7 --make-bed
-sed -i 's/  / /g' merge_NeuroChip_INDI_v2.diff # need to do this x5
+sed -i 's/  / /g' merge_NBA_INDI_v2.diff # need to do this x5
+sed -i 's/  / /g' merge_NBA_INDI_v2.diff # need to do this x5
+sed -i 's/  / /g' merge_NBA_INDI_v2.diff # need to do this x5
+sed -i 's/  / /g' merge_NBA_INDI_v2.diff # need to do this x5
+sed -i 's/  / /g' merge_NBA_INDI_v2.diff # need to do this x5
 
 # Then Running comparison plots for all chromosome based on the merge_NBA_INDI_v2.diff file
 
