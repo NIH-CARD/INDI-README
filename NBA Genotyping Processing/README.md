@@ -22,11 +22,17 @@ Working-dir:
 ### first_data_release_June_2021
 
 - F4SEttehadieh_P1.zip
+- F4SEttehadieh_P2-3.zip
 
-contains:
+F4SEttehadieh_P1.zip contains:
 F4SEttehadieh_P1_Genotyping_Report.txt => full report 
 F4SEttehadieh_P1_QC_Report.xlsx => QC metrics
 Raw_Data/ => with 192 .idats 
+
+F4SEttehadieh_P2-3.zip contains:
+F4SEttehadieh_P2-P3_Genotyping_Report.txt => full report 
+F4SEttehadieh_P2-P3_QC_Report.xlsx => QC metrics  
+Raw_Data/ => with 384 .idats 
 
 - plink files => in folder plink
 ibx.bed  ibx.bim	ibx.fam  ibx.log
@@ -92,6 +98,7 @@ INDI_WGS_RS_only.*
 
 Variants to investigate are:
 
+JAX:
 | Chromosome | NBA_ID                           | BP        | A1   | A2  | INDI          |
 |------------|----------------------------------|-----------|------|-----|---------------|
 | 16         | Seq_rs387906627                  | 31202373  | A    | G   | FUS_R495*     |
@@ -109,6 +116,45 @@ Variants to investigate are:
 | 12         | 12:54677628-G-A                  | 54677628  | 0    | G   | HNRNPA1_D262N |
 | 12         | Seq_rs397518453                  | 54677628  | 0    | G   | HNRNPA1_D262N |
 | Not        | Present                          | on        | the  | NBA | CSF1R_E633K   |
+
+Synthego:
+| Chromosome | NBA_ID                             | BP        | A1 | A2 | INDI             |
+|------------|------------------------------------|-----------|----|----|------------------|
+| 1          | 1:227073304-A-T                    | 227073304 | T  | A  | PSEN2_N141I      |
+| 1          | rs63750215                         | 227073304 | T  | A  | PSEN2_N141I      |
+| 19         | chr19:44908684:T:C                 | 45411941  | 0  | A  | APOE_C156R       |
+| 19         | rs429358                           | 45411941  | 0  | A  | APOE_C156R       |
+| 19         | 19:45412013-C-A                    | 45412013  | 0  | 0  | APOE_R136S       |
+| 19         | seq_rs7412                         | 45412079  | 0  | G  | APOE_R158C       |
+| 16         | 16:31196382-C-T                    | 31196382  | A  | G  | FUS_R216C        |
+| 16         | Seq_rs267606832.1_ilmnfwd_ilmnF2BT | 31196382  | G  | C  | FUS_R216C        |
+| 16         | Seq_rs267606832.2_ilmnfwd_ilmnF2BT | 31196382  | A  | G  | FUS_R216C        |
+| 17         | 17:42427619-C-T                    | 42427619  | A  | G  | GRN_Q125X        |
+| 17         | Seq_rs63750077                     | 42427619  | A  | G  | GRN_Q125X        |
+| 9          | 9:135205819-T-C                    | 135205819 | G  | A  | SETX_L389S       |
+| 9          | Seq_rs29001584                     | 135205819 | G  | A  | SETX_L389S       |
+| 9          | rs29001584                         | 135205819 | G  | A  | SETX_L389S       |
+| 1          | Seq_rs1057519291                   | 17320323  | A  | G  | ATP13A2_T517I    |
+| 1          | 1:11082457-C-A                     | 11082457  | A  | C  | TARDBP_Q331K     |
+| 1          | Seq_rs80356727                     | 11082457  | A  | C  | TARDBP_Q331K     |
+| 6          | Seq_rs201258663                    | 41129195  | A  | G  | TREM2_T66M       |
+| 6          | Variant64110                       | 41129195  | A  | G  | TREM2_T66M       |
+| 6          | rs201258663                        | 41129195  | A  | G  | TREM2_T66M       |
+| 9          | 9:35065348-G-A                     | 35065348  | A  | G  |        VCP_R159H |
+| 9          | Seq_rs121909335                    | 35065348  | A  | G  | VCP_R159H        |
+| 9          | rs121909335                        | 35065348  | A  | G  | VCP_R159H        |
+| 13         | 13:77566311-G-A                    | 77566311  | A  | G  | CLN5_W26X        |
+| 13         | Seq_rs104894385.1_ilmnrev_ilmnF2BT | 77566311  | A  | G  | CLN5_W26X        |
+| 13         | Seq_rs104894385.2_ilmnrev_ilmnF2BT | 77566311  | A  | C  | CLN5_W26X        |
+| 3          | exm331440                          | 87289899  | G  | A  | CHMP2B_I29V      |
+| 3          | rs63750818                         | 87289899  | G  | A  | CHMP2B_I29V      |
+| 3          | seq_rs63750818                     | 87289899  | G  | A  | CHMP2B_I29V      |
+| 4          | 4:90749321-G-A                     | 90749321  | A  | G  | SNCA_E46K        |
+| 1          | 1:227071518-C-T                    | 227071518 | A  | G  | PSEN2_A85V       |
+| 1          | Seq_rs63750048                     | 227071518 | A  | G  | PSEN2_A85V       |
+| 1          | rs63750048                         | 227071518 | A  | G  | PSEN2_A85V       |
+| 21         | 21:27264167-A-G                    | 27264167  | G  | A  | APP_E693G        |
+
 
 ```
 cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_release_June_2021/plink/
