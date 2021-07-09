@@ -42,9 +42,8 @@ these are files from Dan, note general plink files + NOTE has to be clustered wi
 minor follow-up change => update the names of the plink files....
 
 module load plink
-sed -e 's/FUS_R495\*_/FUS_R495X_/g' UPDATE_IBX_names.txt > UPDATE_IBX_namesv2.txt
 
-plink --bfile ibx --update-ids UPDATE_IBX_namesv2.txt --make-bed --out ibx_new_name
+plink --bfile ibx --update-ids UPDATE_IBX_names.txt --make-bed --out ibx_new_name
 
 
 - ibx_variant_metrics.txt
