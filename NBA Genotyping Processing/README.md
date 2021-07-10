@@ -310,14 +310,19 @@ header of file:
 CHROM	POS	ID	REF	ALT	variable	metrics	GT	GQ	BAF	LRR
 
 # cut out sampleIDs
-cut -f 6 ibx_variant_metrics.txt | sort -u > unqiue_samples.txt
+cut -f 6 ibx_variant_metrics.txt > sample_column.txt
+sort -u sample_column.txt > unqiue_samples.txt
 grep -v "variable" unqiue_samples.txt > unqiue_samplesv2.txt
 
 # extract per sample data
 cat unqiue_samplesv2.txt  | while read line
 do 
+   echo "$line"
    grep "$line" ibx_variant_metrics.txt > $line.txt
+   echo "$line"
 done
+
+!!!!continue here!!!!
 
 # add header...
 head -1 ibx_variant_metrics.txt > header.txt
