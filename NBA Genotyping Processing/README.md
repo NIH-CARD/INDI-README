@@ -375,6 +375,22 @@ head(final)
 # save...
 write.table(final, file="anno_file_NBA_v2.txt",quote=F,row.names=F,sep="\t")
 
+### optional for later iterations...
+
+R
+require("dplyr")
+require(data.table)
+anno <- fread("anno_file_NBA_v2.txt")
+problem <- read.table("problem_snps_v2.txt",header=F)
+names(problem)[1] <- "snpName"
+MM2 <- anti_join(anno, problem, by=c("snpName"))
+MM2$snpID <- NULL
+MM2$snpID <- seq.int(nrow(MM2)) 
+final <- MM2[, c(4, 1, 2, 3)]
+head(final)
+write.table(final, file="anno_file_NBA_v3.txt",quote=F,row.names=F,sep="\t")
+
+
 ```
 
 ```
