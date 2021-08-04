@@ -161,6 +161,12 @@ cd /data/CARD/projects/INDI_genotypes/PHASE2_post_KOLF_selection/first_data_rele
 module load plink
 plink --bfile ibx_new_name --extract snps_of_interest_first_data.txt --recodeA --out VARIANT_investigation
 
+plink --bfile ibx_new_name --missing --out CALL_RATES
+
+copy back home:
+CALL_RATES.imiss
+VARIANT_investigation.raw
+
 ```
 
 ## 2. Comparison with WGS
