@@ -1,0 +1,204 @@
+---
+title: "hiPSCi cell line evaluation (hypothalamus) - 07 Marker genes visualisation"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(igraph)
+library(dplyr)
+#library(schex)
+library(wesanderson)
+library(ComplexHeatmap)
+library(circlize)
+library(pals)
+theme_set(theme_cowplot())
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+```{r}
+color_palette = c("#c4eadd",
+                  "#d098d7",
+                  "#dce496",
+                  "#bab5ff",
+                  "#f9d08b",
+                  "#5bb4ef",
+                  "#e1ad71",
+                  "#16c4e8",
+                  "#ffa3c6",
+                  "#4ec9b1",
+                  "#de9a98",
+                  "#22c0ba",
+                  "#ffbfb2",
+                  "#62be93",
+                  "#ffcfe0",
+                  "#c0ffdb",
+                  "#a5b17a",
+                  "#abebff",
+                  "#e0ffd0",
+                  "#9dc4b8",
+                  "#affff5")
+```
+
+For this experiment, we have 2 samples which have been multiplexed by genotype. Unlike the cortical and dopaminergic differentiation where all the cell lines were pooled together before differentiation, in hypothalamic differentiation we performed differentiation for each cell line individually.
+
+We also do not have any user replicate in hypothalamic differentiation and only have technical replicate. As such the set up of the sample libraries are as follow:
+
+- Sample 1: Hypothalamic cell line 1-9 A
+- Sample 2: Hypothalamic cell line 1-9 B
+
+# Marker genes visualisation
+
+```{r}
+merged_sce_object = readRDS("dc_cell.rds")
+# To properly perform batch correction, we need to remove doublets first
+merged_sce_object = merged_sce_object[, colData(merged_sce_object)$final_doublet_call == "Singlet"]
+# Since we are only interested in the 8 cell line from iNDI, we will remove the Hues9 line that was added to this differentiation
+merged_sce_object = merged_sce_object[, colData(merged_sce_object)$vireo_assignment != "HUES9"]
+
+sce_object_mnn = readRDS("clustered_cell.rds")
+```
+
+Let's now transfer the information from the sce object (with HVG genes only) to the full merged object (with all genes).
+
+```{r}
+# Rearrange the sce_object_mnn to match the ordering of merged_sce_object
+colnames(sce_object_mnn) = paste0(sce_object_mnn$Sample, ".", sce_object_mnn$Barcode)
+sce_object_mnn = sce_object_mnn[, paste0(merged_sce_object$Sample, ".", merged_sce_object$Barcode)]
+
+merged_sce_object$cluster = sce_object_mnn$cluster
+
+# Transfer the reducedDim representation and trim it to the first 2 dim only
+for (reduced_dim in names(reducedDims(sce_object_mnn))) {
+  reducedDim(merged_sce_object, reduced_dim) = reducedDim(sce_object_mnn, reduced_dim)[,c(1:2)]
+}
+
+merged_sce_object
+```
+
+## Marker genes
+
+We will first find genes which are up-regulated in each clusters. Note that by default, the findMarkers does explicitly favour genes that are uniquely expressed in a cluster (so we may find the same gene markers in multiple clusters.)
+
+```{r}
+cluster_markers = findMarkers(merged_sce_object, merged_sce_object$cluster, block=merged_sce_object$Sample, assay.type="logcounts", direction="up", lfc=0.5, pval.type="any")
+cluster_markers_top5 = Reduce(rbind, lapply(1:length(cluster_markers), function(i) {
+  markers = cluster_markers[[i]]
+  top_markers = markers[markers$Top <= 5, ]
+  top_markers$cluster = i
+  top_markers[, paste0("logFC.",i)] = 0
+  top_markers$gene_name = rownames(top_markers)
+  top_markers
+}))
+as.data.frame(cluster_markers_top5)
+
+write.csv(cluster_markers_top5, file = "hypothalamic_differentiation_cluster_markers_any_top5.csv", row.names = FALSE)
+```
+
+```{r}
+cluster_markers_all = findMarkers(merged_sce_object, merged_sce_object$cluster, block=merged_sce_object$Sample, assay.type="logcounts", direction="up", lfc=0.5, pval.type="all")
+cluster_markers_all_sig = Reduce(rbind, lapply(1:length(cluster_markers_all), function(i) {
+  markers = cluster_markers_all[[i]]
+  print(table(markers$FDR < 0.01))
+  if (TRUE %in% (markers$FDR < 0.01)) {
+    top_markers = markers[markers$FDR < 0.01, ]
+    top_markers$cluster = i
+    top_markers[, paste0("logFC.",i)] = 0
+    top_markers$gene_name = rownames(top_markers)
+    top_markers 
+  }
+}))
+as.data.frame(cluster_markers_all_sig)
+
+write.csv(cluster_markers_all_sig, file = "hypothalamic_differentiation_cluster_markers_all_sig.csv", row.names = FALSE)
+```
+
+## Curated marker genes
+
+Let's define the set of marker genes we will use. This is copied from Florian's curated list from the 4x4 project.
+
+```{r}
+neuronal_markers = c("ELAVL4", "ENO2", "GAP43", "MAP2", "MAPT", "RBFOX3", "SNAP25", "STMN2", "SYT1", "TUBB2A", "LHX1", "NPY", "SST", "5HT3AR", "CALB", "PVALB", "VIP", "LHX5", "DLX1", "DLX5", "DLX6", "DLX2", "GAD1", "GAD2", "SLC32A1", "CAMK2A", "SLC17A6", "DCX", "CPEB3", "DRD2", "EPHA5", "ERC2", "GRIA3", "LMO3", "LMX1B", "LRRC3B", "LRRTM2", "LSAMP", "LY6H", "PBX1", "PRRT4", "RET", "SCNA", "TH", "TMEFF2", "TMEM255A", "ALDH1A1", "CHGB", "GATA2", "GCHFR", "SLC18A2", "TPH2")
+progenitor_markers = c("BMP4", "CSPG4", "PDGFRA", "WNT7A", "WNT7B", "DMBX1", "HMGA1", "ZEB2", "AURKA", "UBE2C", "MKI67", "TOP2A", "FEZF2", "FOXD1", "ASCL1", "DLK1", "DLL3", "HES5", "SOX2", "NES", "VIM", "FOXA1", "FABP7", "S100B", "SLC1A3")
+other_markers = c("AQP4", "FGFR3", "GFAP", "GJB3", "SLC1A2", "SLC7A10", "SOX9", "DNAH11", "MLF1", "TTR", "CCDC153", "FOXJ1", "STOML3", "TM4SF1", "TMEM212", "LMX1A", "FOXA2", "ADM", "CD59A", "COL25A1", "CRYM ", "LHX2", "SLC16A2", "SLC17A8", "VCAN", "RAX", "S100A6", "SIM1", "NHLH1", "NEUROD1", "NEUROG1", "NEUROG2", "NHLH2", "GJC2", "MAG", "MAN1A", "MBP", "MOG", "OLIG2", "SOX10", "FYN")
+regional_markers = c("S100A10", "SPRR1A", "SIX3", "SIX6", "ST18", "GPC3", "TBX3", "NKX6-2", "ONECUT2", "FGF8", "SNHG11", "LHX9", "CARTPT", "LHX6", "LHX8", "ARX", "VAX1", "NKX2-2", "OTX2", "HCRT", "PDYN", "QRFP", "FOXB1", "HDC", "PCP4", "UNCX", "PITX2", "BUB3", "CITED1", "LEF1", "HMX2", "EMX2", "MEIS2", "PAX6", "SP8", "SP9", "ISL1", "OTP", "EBF3", "TBCA", "POU3F2", "PROK2", "RORA", "VIPR2", "ZIC1", "BARHL1", "FOXP2", "IRX3", "IRX5", "NR4A2", "TBR1", "EMX1", "FOXG1", "FRZB", "WNT8B", "CHCHD10", "NR5A1", "SOX14")
+subtype_markers = c("AGRP", "AVP", "CRH", "MEST", "NPVF", "OXT", "POMC", "RGCC", "SCN7A", "TAC2", "TRH", "GHRH", "HTR3A", "IGFBP5", "KISS1")
+curated_markers = rbind(data.frame(gene=neuronal_markers, marker_type="neuronal"),
+                        data.frame(gene=progenitor_markers, marker_type="progenitor"),
+                        data.frame(gene=other_markers, marker_type="other"),
+                        data.frame(gene=regional_markers, marker_type="regional"),
+                        data.frame(gene=subtype_markers, marker_type="subtype"))
+```
+
+## Marker expression visualisation
+
+Let's calculate the schex representation of the UMAP for figures requiring expression plotted on UMAP.
+
+```{r, fig.width=5, fig.height=4}
+merged_sce_object = schex::make_hexbin(merged_sce_object, nbins=90, dimension_reduction="UMAP", use_dims=c(1,2))
+plot_hexbin_density(merged_sce_object)
+```
+
+Now let's visualise all the markers in (schex) UMAP plot. (Note that we will skip this due to the large number of markers present!)
+
+```{r}
+# for (marker_name in unique(curated_markers$marker_type)) {
+#   current_marker = intersect(curated_markers[curated_markers$marker_type == marker_name, c("gene")], rownames(merged_sce_object))
+#   per_cluster_plots = lapply(1:max(as.integer(merged_sce_object$cluster)), function(i) {
+#     plotExpression(merged_sce_object[, merged_sce_object$cluster == i], current_marker, point_size=0.5, theme_size=8) + ggtitle(paste0("Cluster ",i))
+#   })
+# 
+#   ggsave(paste0("hypothalamic_differentiation_",marker_name,"_curated_markers_expression_overlay.png"), plot = plot_grid(plotlist = per_cluster_plots, ncol=1), width = 1*length(current_marker), height = 3.5*max(as.integer(sce_object$subclusters)), units="cm", limitsize = FALSE)
+# }
+```
+
+Let's also visualise them as violin plot as this is a bit easier for comparison across clusters.
+
+```{r}
+for (marker_name in unique(curated_markers$marker_type)) {
+  current_marker = intersect(curated_markers[curated_markers$marker_type == marker_name, c("gene")], rownames(merged_sce_object))
+  per_cluster_plots = lapply(1:max(as.integer(merged_sce_object$cluster)), function(i) {
+    plotExpression(merged_sce_object[, merged_sce_object$cluster == i], current_marker, point_size=0.5, theme_size=8) + ggtitle(paste0("Cluster ",i))
+  })
+  
+  ggsave(paste0("hypothalamic_differentiation_",marker_name,"_curated_markers_expression_violin.png"), plot = plot_grid(plotlist = per_cluster_plots, ncol=1), width = 1*length(current_marker), height = 3*max(as.integer(sce_object_mnn$cluster)), units="cm", limitsize = FALSE)
+}
+```
+
+Finally, let's visualise them in a heatmap (per cluster rather than per cell) as a way to also indicate similarity of the clusters based on the marker genes provided above.
+
+```{r}
+merged_sce_object_markers_mean = logcounts(aggregateAcrossCells(merged_sce_object[intersect(curated_markers$gene, rownames(merged_sce_object)), ], merged_sce_object$cluster, average=T, use_exprs_values="logcounts"))
+
+expressed_markers = rownames(merged_sce_object_markers_mean)[apply(merged_sce_object_markers_mean, 1, sum) > 0]
+merged_sce_object_markers_mean = merged_sce_object_markers_mean[expressed_markers,]
+
+scaled_merged_sce_object_markers_mean = pheatmap:::scale_rows(merged_sce_object_markers_mean)
+```
+
+```{r, fig.width=6, fig.height=8}
+merged_sce_object_markers_cor = cor(merged_sce_object_markers_mean, method="pearson")
+
+Heatmap(scaled_merged_sce_object_markers_mean, col=ocean.delta(100)[18:90], name="z-score", cluster_columns = hclust(as.dist(1-merged_sce_object_markers_cor)), clustering_distance_rows= "pearson", column_dend_height = unit(20, "mm"), row_dend_width = unit(20, "mm"), row_names_gp = gpar(fontsize = 6)) + 
+Heatmap(merged_sce_object_markers_mean, col=viridis(100), name="mean_logcounts", cluster_columns = hclust(as.dist(1-merged_sce_object_markers_cor)), clustering_distance_rows= "pearson", column_dend_height = unit(20, "mm"), row_dend_width = unit(20, "mm"), row_names_gp = gpar(fontsize = 6))
+```
+

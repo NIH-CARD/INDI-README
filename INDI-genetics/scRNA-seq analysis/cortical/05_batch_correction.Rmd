@@ -1,0 +1,112 @@
+---
+title: "hiPSCi cell line evaluation (cortical) - 05 Batch correction"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(dplyr)
+theme_set(theme_cowplot())
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+For this experiment, we have 2 samples which have been multiplexed by both genotype and replicate (using multiseq sample labelling). In the cortical differentiation, all the cell lines were pooled together before differentiation. Furthermore, we have 6 replicates overall from 3 different operator with 2 technical replicates each.
+
+- Sample SIGAE1: Cortical differentiation cell line 1-8 user 1-3 technical replicate 1 
+- Sample SIGAF1: Cortical differentiation cell line 1-8 user 1-3 technical replicate 2
+
+# Batch correction
+
+```{r}
+merged_sce_object = readRDS("dc_cell.rds")
+
+# To properly perform batch correction, we need to remove doublets first
+merged_sce_object = merged_sce_object[, colData(merged_sce_object)$final_doublet_call == "Singlet"]
+# After the first round of clustering and analysis, we detect that 1 user replicates (Bar 9 and 10) behave very differently compared to other replicates. As such, we will remove this user replicate.
+merged_sce_object = merged_sce_object[, !(colData(merged_sce_object)$multiseq_assignment %in% c("Bar9", "Bar10"))]
+```
+
+For the modeling of gene-variance relationship, we will again remove MT and Ribosomal genes due to the issue we see during doublet detection.
+
+```{r, fig.height=3}
+set.seed(1000)
+non_mito_ribo_genes = rownames(merged_sce_object)[grep(pattern = "^(MT-|RP[LS]|MALAT1)", rownames(merged_sce_object), invert = TRUE)]
+dec_combined = modelGeneVar(merged_sce_object, subset.row=non_mito_ribo_genes, block=merged_sce_object$Sample)
+hvg_combined = getTopHVGs(dec_combined)
+length(hvg_combined)
+```
+
+```{r, fig.height=2}
+trend_plotlist = lapply(1:length(dec_combined$per.block), function (i){
+  sample = names(dec_combined$per.block)[[i]]
+  fit = metadata(dec_combined$per.block[[i]])
+ggplot(data = data.frame(mean = fit$mean, var = fit$var, name=ifelse(fit$mean > 4 | fit$var > 2, names(fit$mean), NA)),
+                mapping = aes(x = mean, y = var, label=name)) +
+  geom_point() +
+  ggtitle(sample) +
+  labs(x = "Mean log-expression", y = "Variance of log-expression") +
+  stat_function(fun=fit$trend, colour="dodgerblue", size=1)
+})
+
+plot_grid(plotlist = trend_plotlist, ncol=2)
+```
+
+```{r}
+set.seed(1000)
+sce_object_mnn = correctExperiments(merged_sce_object, 
+                                    batch = merged_sce_object$Sample,
+                                    subset.row = hvg_combined,
+                                    PARAM=FastMnnParam(
+                                      merge.order=list("Sample_SIGAE1", "Sample_SIGAF1")
+                                    ))
+```
+
+Let's run UMAP for visualisation.
+
+```{r}
+set.seed(1000)
+sce_object_mnn = runUMAP(sce_object_mnn, ncomponents=2, dimred="corrected", spread = 1, min_dist = 0.4)
+```
+
+Let's also calculate the UMAP for the unmerged dataset so we can do comparison.
+
+```{r}
+set.seed(1000)
+merged_sce_object = runPCA(merged_sce_object, subset_row=hvg_combined)
+merged_sce_object = runUMAP(merged_sce_object, ncomponents=2, dimred="PCA", spread = 1, min_dist = 0.4)
+```
+
+```{r, fig.width=10, fig.height=5}
+plot_grid(plotUMAP(merged_sce_object, colour_by="Sample") + ggtitle("Original"), 
+          plotUMAP(sce_object_mnn, colour_by="Sample") + ggtitle("Final"))
+```
+
+```{r}
+plotUMAP(merged_sce_object, colour_by="Sample", other_fields="Sample") + ggtitle("Original") + facet_wrap(~Sample) + theme(legend.position = "none")
+plotUMAP(sce_object_mnn, colour_by="Sample", other_fields="Sample") + ggtitle("Final") + facet_wrap(~Sample) + theme(legend.position = "none")
+```
+
+```{r}
+saveRDS(sce_object_mnn, "all_corrections.rds")
+```
+
+

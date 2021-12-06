@@ -1,0 +1,103 @@
+---
+title: "hiPSCi cell line evaluation (hNGN2) - 03 Normalisation"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(dplyr)
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+For this experiment, we have 4 samples which have been multiplexed by genotype. We have two different pooling strategy used:
+
+ 1. Pool 1 and 2 conditions: The 8 ipsc lines were differentiated in separate wells (n=2, total of 16 wells) from day 1 to 17. On day 17 the cells were papain-dissociated and pooled the eight lines into one single tube (n=2) to proceed with 10x genomics experiment.
+ 2.  Combined 1 and 2 conditions: The 8 ipsc lines were differentiated in separate wells (n=2, total of 16 wells) from day 1 to 3.  On day 3 the 8 lines were pooled into one well (n=2) and continue differentiation until day 17.  On day 17 the cells were papain-dissociated to proceed with 10x genomics experiment.
+
+- Sample Pool1: hNGN2 pool cell line 1-8 replicate 1
+- Sample Pool2: hNGN2 pool cell line 1-8 replicate 2
+- Sample Combined1: hNGN2 combined cell line 1-8 replicate 1
+- Sample Combined2: hNGN2 combined cell line 1-8 replicate 2
+
+# Normalisation
+
+```{r}
+merged_sce_object = readRDS("qc_cell.rds")
+```
+
+## Merged normalisation
+
+We will now do normalisation between samples.
+
+```{r, fig.height=3}
+set.seed(1000)
+clusters = quickCluster(merged_sce_object, use.ranks=FALSE, BSPARAM=IrlbaParam(), BPPARAM=mcparam)
+table(clusters)
+table(merged_sce_object$Sample, clusters)
+ggplot(melt(table(merged_sce_object$Sample, clusters)), aes(x=clusters, y=value, fill=Var1)) + geom_bar(stat="identity") + theme_cowplot()
+```
+
+```{r}
+merged_sce_object = computeSumFactors(merged_sce_object, min.mean=0.1, cluster=clusters, BPPARAM=mcparam)
+```
+
+Let's visualise the size factors.
+
+```{r, fig.height=4}
+merged_sce_object_mixed = merged_sce_object[, sample(ncol(merged_sce_object))]
+plotColData(merged_sce_object_mixed, x="sum", y=I(sizeFactors(merged_sce_object_mixed)), colour_by = "Sample") +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x = "Number of UMIs", y = "Size Factor") 
+```
+
+```{r, fig.width=9, fig.height=8}
+plotColData(merged_sce_object_mixed, x="sum", y=I(sizeFactors(merged_sce_object_mixed)), colour_by = "Sample", other_fields = "Sample") +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x = "Number of UMIs", y = "Size Factor") +
+  facet_wrap(~Sample, ncol=2)
+```
+
+Let's do the normalisation now.
+
+```{r}
+merged_sce_object_norm = logNormCounts(merged_sce_object)
+```
+
+Let's have a quick look at the distribution of the normalised counts.
+
+```{r}
+merged_sce_object_norm_qc = addPerCellQC(merged_sce_object_norm, exprs_values = "logcounts")
+colData(merged_sce_object_norm_qc) = colData(merged_sce_object_norm_qc)[, c(1:3, (length(colData(merged_sce_object_norm))+1):length(colData(merged_sce_object_norm_qc)))]
+```
+
+```{r}
+plotColData(merged_sce_object_norm_qc, x = "Sample", y = "sum") +
+  labs(y = "normalised UMI count")
+```
+
+The result of the normalisation looks good, though we see a very slight shift in distribution for the combined 1 sample.
+
+```{r}
+saveRDS(merged_sce_object_norm, "norm_cell.rds")
+```

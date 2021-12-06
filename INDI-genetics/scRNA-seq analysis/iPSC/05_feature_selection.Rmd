@@ -1,0 +1,80 @@
+---
+title: "hiPSCi cell line evaluation (iPSC) - 05 Feature selection"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(dplyr)
+theme_set(theme_cowplot())
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+For this experiment, we have 1 sample composed of all 8 iPSC cell line (undifferentiated) which have been multiplexed by genotype. 
+
+# Feature selection
+
+Since we only have one iPSC samples, we do not need to do any batch correction, but we will still need to perform feature selection for dimensionality reduction and clustering.
+
+```{r}
+merged_sce_object = readRDS("dc_cell.rds")
+
+# To properly perform batch correction, we need to remove doublets first
+merged_sce_object = merged_sce_object[, colData(merged_sce_object)$final_doublet_call == "Singlet"]
+```
+
+For the modeling of gene-variance relationship, we will again remove MT and Ribosomal genes due to the issue we see during doublet detection.
+
+```{r, fig.height=3}
+set.seed(1000)
+non_mito_ribo_genes = rownames(merged_sce_object)[grep(pattern = "^(MT-|RP[LS]|MALAT1)", rownames(merged_sce_object), invert = TRUE)]
+dec_combined = modelGeneVar(merged_sce_object, subset.row=non_mito_ribo_genes, block=merged_sce_object$Sample)
+hvg_combined = getTopHVGs(dec_combined)
+length(hvg_combined)
+```
+
+```{r}
+fit = metadata(dec_combined)
+ggplot(data = data.frame(mean = fit$mean, var = fit$var, name=ifelse(fit$mean > 4 | fit$var > 2, names(fit$mean), NA)),
+                mapping = aes(x = mean, y = var, label=name)) +
+  geom_point() +
+  labs(x = "Mean log-expression", y = "Variance of log-expression") +
+  stat_function(fun=fit$trend, colour="dodgerblue", size=1)
+```
+
+Let's now calculate the UMAP for the single dataset.
+
+```{r}
+set.seed(1000)
+merged_sce_object = runPCA(merged_sce_object, subset_row=hvg_combined)
+merged_sce_object = runUMAP(merged_sce_object, ncomponents=2, dimred="PCA", spread = 1, min_dist = 0.4)
+```
+
+```{r, fig.width=5, fig.height=5}
+plotUMAP(merged_sce_object, colour_by="Sample") + ggtitle("Original")
+```
+
+```{r}
+saveRDS(merged_sce_object, "all_corrections.rds")
+```
+
+

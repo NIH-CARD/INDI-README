@@ -1,0 +1,274 @@
+---
+title: "hiPSCi cell line evaluation (iPSC) - 02 Quality Control Analysis"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=8, fig.height=6, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(dplyr)
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+For this experiment, we have 1 sample composed of all 8 iPSC cell line (undifferentiated) which have been multiplexed by genotype. 
+
+# Pre-processsing
+
+```{r}
+sce_object = readRDS("called_cell.rds")
+```
+
+## Vireo demultiplexing
+
+```{r}
+vireo_assignments = lapply(paste0(list.files(pattern="^Sample_.*vireo_vartrix_genotype"), "/donor_ids.tsv"), read.table, header=TRUE, row.names = 1, stringsAsFactors = FALSE)
+lapply(vireo_assignments, head)
+```
+
+```{r}
+vireo_assignments_called_only = lapply(1:length(sce_object), function(i) {
+  vireo_assignments[[i]][colData(sce_object[[i]])$Barcode,]
+})
+lapply(vireo_assignments_called_only, function(x) table(x$donor_id))
+```
+
+```{r}
+sce_object = lapply(1:length(sce_object), function(i) {
+  sce = sce_object[[i]]
+  current_donor_id = vireo_assignments_called_only[[i]]$donor_id
+  current_donor_id[current_donor_id == "donor7"] = "HUES9"
+  colData(sce)$vireo_assignment = current_donor_id
+  sce
+})
+
+sce_object
+```
+
+```{r, fig.width=2, fig.height=4}
+cell_lines = c("KOLF2-ARID2-A02", "KUCG3-C1", "LNGPI1-C1", "NCRM1-C6", "NCRM5-C5", "NN0003932-C3", "PGP1-C2", "doublet", "unassigned")
+vireo_count_df = Reduce(rbind, lapply(sce_object, function(x) data.frame(table(colData(x)$vireo_assignment))))
+vireo_count_df$Var1 = factor(vireo_count_df$Var1, levels = cell_lines)
+colnames(vireo_count_df) = c("Cell line", "Count")
+vireo_count_df$Sample = Reduce(c, lapply(1:length(sce_object), function(i) rep(i, length(cell_lines))))
+
+theme_set(theme_classic())
+ggplot(data=vireo_count_df, aes(x=Sample, y=Count, fill=`Cell line`)) + 
+  geom_bar(stat="identity") + 
+  scale_x_discrete() +
+  labs(x=NULL)+
+  ggtitle("Cell line assignment") +
+  geom_text(aes(label=Count), position=position_stack(vjust=0.5), colour="white") +
+  labs(fill="")
+```
+
+## Merging all samples
+
+Let's now merge all the samples into one SCE object.
+
+```{r}
+merged_sce_object = Reduce(cbind, sce_object)
+colData(merged_sce_object)$Sample = gsub("/.+", "", colData(merged_sce_object)$Sample)
+merged_sce_object
+```
+
+## Gene annotation
+
+We want to now annotate the gene with their location so we can determine the mitochondrial genes. These MT genes will be used in QC as a measure of cell viability.
+
+```{r}
+library(EnsDb.Hsapiens.v86)
+GRCh38_location = mapIds(EnsDb.Hsapiens.v86, keys=rownames(rowData(merged_sce_object)), column="SEQNAME", keytype="GENEID")
+rowData(merged_sce_object)$Chromosome = GRCh38_location
+rowData(merged_sce_object)$Symbol = gsub("GRCh38_", "", rowData(merged_sce_object)$Symbol)
+
+rownames(merged_sce_object) = uniquifyFeatureNames(rowData(merged_sce_object)$ID, rowData(merged_sce_object)$Symbol)
+rowData(merged_sce_object)
+```
+
+#  Quality control
+
+We will use the following metrics for performing quality control check:
+
+1. Library size
+2. Number of expressed features
+3. Proportion of mitochondrial reads (in lieu of spike in control)
+
+```{r}
+mito_genes = which(rowData(merged_sce_object)$Chromosome=="MT")
+ribo_genes = which(grepl("^RP[LS]", rowData(merged_sce_object)$Symbol, ))
+names(ribo_genes) = rowData(merged_sce_object)$Symbol[ribo_genes]
+merged_sce_object = addPerCellQC(merged_sce_object, subsets = list(Mito=mito_genes, Ribo=ribo_genes))
+```
+
+## Library size
+
+Let's look at the library size to see if there is similar distribution across all samples. After downsampling, we expect to see similar distribution across all samples.
+
+```{r, fig.height=4, fig.width=5}
+plotColData(merged_sce_object, x="Sample", y="sum", colour_by = "vireo_assignment") +
+  scale_y_log10() +
+  labs(y = "UMI count")
+```
+
+The downsampling seems to work quite nicely. We can now do the QC across batch. We will also want to remove cell that have too high of a UMI count on top of cell that have too low of a UMI count. 
+
+```{r, fig.height=4, fig.width=5}
+qc.lib.size = isOutlier(merged_sce_object$sum, log=TRUE, type="both", batch = merged_sce_object$Sample)
+
+plotColData(merged_sce_object, x="Sample", y="sum", colour_by = I(qc.lib.size)) +
+  scale_y_log10() +
+  labs(y = "UMI count")
+```
+
+Now that the cells have been downsampled, the across sample thresholding makes much more sense!. Note that the orange colours are the outlier.
+
+```{r}
+plotColData(merged_sce_object, x="Sample", y="sum", colour_by = I(qc.lib.size), other_fields = "vireo_assignment") +
+  scale_y_log10() +
+  labs(y = "UMI count") + 
+  facet_wrap(~vireo_assignment)
+```
+
+
+## Expressed features
+
+Let's now look at the expressed features distribution for each samples to see if we see different distribution.
+
+```{r, fig.height=4, fig.width=5}
+plotColData(merged_sce_object, x="Sample", y="detected", colour_by = "vireo_assignment") +
+  scale_y_log10() +
+  labs(y = "Number of expressed genes")
+```
+
+We see that the ranges of the distribution are quite similar.
+
+```{r, fig.height=4, fig.width=5}
+qc.expr.genes = isOutlier(merged_sce_object$detected, log=TRUE, type="both", batch = merged_sce_object$Sample)
+
+plotColData(merged_sce_object, x="Sample", y="detected", colour_by = I(qc.expr.genes)) +
+  scale_y_log10() +
+  labs(y = "Number of expressed genes")
+```
+
+Orange = outlier.
+
+```{r}
+plotColData(merged_sce_object, x="Sample", y="detected", colour_by = I(qc.expr.genes), other_fields = "vireo_assignment") +
+  scale_y_log10() +
+  labs(y = "Number of expressed genes") + facet_wrap(~vireo_assignment)
+```
+
+## Cell complexity thresholding
+
+Let's combine both the UMI count and number of gene expressed into a single plot to look at the cell complexity thresholding.
+
+```{r, fig.height=4, fig.width=5}
+plotColData(merged_sce_object, x="sum", y="detected", colour_by = I(qc.expr.genes | qc.lib.size), other_fields = "Sample") +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x = "UMI count", y = "Number of expressed genes") 
+```
+
+## Mitochondrial gene expression
+
+Let's look at per sample mitochondrial gene expression
+
+```{r}
+plotColData(merged_sce_object, x="Sample", y="subsets_Mito_percent", colour_by = "vireo_assignment", other_fields = "Sample")
+```
+
+For mito percentage, it seems that QC across sample will likely not turn out well given the still very different distribution between the samples. So we will do the QC per sample here.
+
+```{r}
+qc.high.mito = isOutlier(merged_sce_object$subsets_Mito_percent, nmads=3, type="higher", batch = merged_sce_object$Sample)
+
+plotColData(merged_sce_object, x="Sample", y="subsets_Mito_percent", colour_by = I(qc.high.mito), other_fields = "Sample") +
+  labs(y = "Mitochondrial read percentage")
+```
+
+```{r}
+plotColData(merged_sce_object, x="Sample", y="subsets_Mito_percent", colour_by = I(qc.high.mito), other_fields = "vireo_assignment") +
+  labs(y = "Mitochondrial read percentage") + facet_wrap(~vireo_assignment)
+```
+
+```{r, fig.width=5, fig.height=4}
+plotColData(merged_sce_object, x="sum", y="subsets_Mito_percent", colour_by = I(qc.high.mito), other_fields = "Sample") +
+  labs(x="UMI count", y = "Mitochondrial read percentage") 
+```
+
+## Ribosomal gene expression
+
+```{r}
+plotColData(merged_sce_object, x="Sample", y="subsets_Ribo_percent", colour_by = "vireo_assignment", other_fields = "Sample")
+```
+
+```{r}
+plotColData(merged_sce_object, x="Sample", y="subsets_Ribo_percent", colour_by = "vireo_assignment", other_fields = "vireo_assignment") + facet_wrap(~vireo_assignment)
+```
+
+For the undifferentiated iPSC, we don't see much difference in the ribosomal percentage across the different cell lines.
+
+```{r}
+plotColData(merged_sce_object, x="Sample", y="subsets_Ribo_percent", colour_by = I(log(merged_sce_object$sum)), other_fields = "vireo_assignment") + facet_wrap(~vireo_assignment)
+```
+
+There seems to be roughly equal amount of UMI overall, which makes sense given that the cells are undifferentiated and therefore should practically be all 'identical'.
+
+```{r}
+qc.high.ribo = isOutlier(merged_sce_object$subsets_Ribo_percent, nmads=3, type="higher", batch = merged_sce_object$Sample)
+
+plotColData(merged_sce_object, x="Sample", y="subsets_Ribo_percent", colour_by = I(qc.high.ribo), other_fields = "Sample") +
+  labs(y = "Ribosomal read percentage")
+```
+
+We do identify some outlier for ribosomal, but this is likely also outliers in other aspect as well (e.g. due to lib size of number or expressed genes)
+
+# Outlier determination
+
+Since we see issue with mitochondrial and mitochondrial genes having high average expression and high variance, let's see if the approach we used with removing cell with too many UMI (and with too many genes, though there is only a few here) have effect on cells that get filtered.
+
+```{r, fig.height=4, fig.width=5}
+plotColData(merged_sce_object, x="sum", y="subsets_Mito_percent", colour_by = I(qc.high.mito | qc.expr.genes | qc.lib.size), other_fields = "Sample") +
+  labs(x="UMI count", y = "Mitochondrial read percentage")
+```
+We will use some qc metrics (UMI count, detected genes, MT content) for determining which cell to keep.
+
+```{r}
+discard_reasons = data.frame(sample=merged_sce_object$Sample, cell_line=merged_sce_object$vireo_assignment, outlier_umi_count=qc.lib.size, outlier_expressed_genes=qc.expr.genes, high_mito_content=qc.high.mito, discarded=qc.high.mito | qc.expr.genes | qc.lib.size)
+
+group_by(discard_reasons, sample) %>% summarise(outlier_umi_count = sum(outlier_umi_count), outlier_expressed_genes = sum(outlier_expressed_genes), high_mito_content = sum(high_mito_content), discarded = sum(discarded), total_cells = n())
+```
+
+Let's have a quick look at the per cell line discard statistics.
+
+```{r}
+group_by(discard_reasons, sample, cell_line) %>% summarise(outlier_umi_count = sum(outlier_umi_count), outlier_expressed_genes = sum(outlier_expressed_genes), high_mito_content = sum(high_mito_content), discarded = sum(discarded), total_cells = n())
+```
+
+```{r}
+merged_sce_object = merged_sce_object[, !(qc.high.mito | qc.expr.genes | qc.lib.size | merged_sce_object$vireo_assignment == "unassigned")]
+merged_sce_object
+```
+
+```{r}
+saveRDS(discard_reasons, "discard_reasons.rds")
+saveRDS(merged_sce_object, "qc_cell.rds")
+```

@@ -1,0 +1,120 @@
+---
+title: "hiPSCi cell line evaluation (hNGN2) - 01 Cell Calling"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+For this experiment, we have 4 samples which have been multiplexed by genotype. We have two different pooling strategy used:
+
+ 1. Pool 1 and 2 conditions: The 8 ipsc lines were differentiated in separate wells (n=2, total of 16 wells) from day 1 to 17. On day 17 the cells were papain-dissociated and pooled the eight lines into one single tube (n=2) to proceed with 10x genomics experiment.
+ 2.  Combined 1 and 2 conditions: The 8 ipsc lines were differentiated in separate wells (n=2, total of 16 wells) from day 1 to 3.  On day 3 the 8 lines were pooled into one well (n=2) and continue differentiation until day 17.  On day 17 the cells were papain-dissociated to proceed with 10x genomics experiment.
+
+- Sample Pool1: hNGN2 pool cell line 1-8 replicate 1
+- Sample Pool2: hNGN2 pool cell line 1-8 replicate 2
+- Sample Combined1: hNGN2 combined cell line 1-8 replicate 1
+- Sample Combined2: hNGN2 combined cell line 1-8 replicate 2
+
+# Cell calling
+
+We will use the `EmptyDrops` method for performing cell selection, developed by Aaron, since the implementation by CellRanger is not exactly the same as the implementation in the R package.
+
+```{r}
+samples = list.files(pattern="^Sample_.*")
+
+sce_object = lapply(samples, read10xCounts)
+```
+
+Let's first look at the barcode distribution across cell, ranked by total UMI count.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+lapply(sce_object, function(x){
+  bcrank = barcodeRanks(counts(x))
+  
+  # Only showing unique points for plotting speed.
+  uniq = !duplicated(bcrank$rank)
+  plot(bcrank$rank[uniq], bcrank$total[uniq], log="xy", xlab="Rank", ylab="Total UMI count", cex.lab=1.2)
+  
+  abline(h=metadata(bcrank)$inflection, col="darkgreen", lty=2)
+  abline(h=metadata(bcrank)$knee, col="dodgerblue", lty=2)
+  
+  legend("bottomleft", legend=c("Inflection", "Knee"),col=c("darkgreen", "dodgerblue"), lty=2, cex=1.2)
+})
+```
+
+`EmptyDrops` by default uses any barcode with < 100 UMI count to model the ambient RNA content as these barcodes are assumed to correspond to empty droplets. Let's look at these background RNA distribution.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+lapply(sce_object, function(x){
+  mat = assay(x)
+  targets = mat[, Matrix::colSums(mat)!=0 & Matrix::colSums(mat) < 200]
+  sums = Matrix::colSums(targets)
+  reads = as.matrix(table(sums) * as.numeric(names(table(sums))))
+  
+  ggplot(data.frame(lib = reads, n = as.numeric(rownames(reads))), aes(x = n, y= lib)) +
+    geom_bar(stat = "identity") +
+    theme_bw() +
+    labs(x = "Barcode library UMI count", y = "Total contribution to background vector") +
+    scale_x_continuous(breaks = seq(0, 200, 5))
+})
+```
+
+For the hNGN2 sample, 100 is an acceptable threshold to use for the last 3 samples, but it is not sufficient for the first sample due to the higher sequencing depth of the first sample. As such, we instead use the 150 threshold, which will should be sufficient for all samples. 
+
+Let's perform `EmptyDrops` now.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+set.seed(100)
+lower_bound = 150
+emptyDrops_out = lapply(1:length(sce_object), function(i) {
+  x = sce_object[[i]]
+  emptyDrops(counts(x), lower = lower_bound, BPPARAM = mcparam, niters = 10000)
+})
+```
+
+```{r}
+lapply(emptyDrops_out, function(x) summary(x$FDR <= 0.001))
+```
+
+```{r}
+sce_object = lapply(1:length(sce_object), function (i) {
+  print(i)
+  sce_object[[i]][,which(emptyDrops_out[[i]]$FDR <= 0.001)]
+})
+```
+
+Valid barcode extraction for vartrix-vireo cell calling.
+
+```{r}
+lapply(1:length(sce_object), function (i) {
+  write.table(sce_object[[i]]$Barcode, file = paste("emptyDrops_barcode_", sce_object[[i]]$Sample[1], "_vartrix.txt", sep=""), quote=FALSE, row.names = FALSE, col.names = FALSE)
+})
+```
+
+
+```{r}
+saveRDS(emptyDrops_out, "emptyDrops_output.rds")
+saveRDS(sce_object, "called_cell.rds")
+```

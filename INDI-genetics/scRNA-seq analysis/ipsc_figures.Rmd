@@ -1,0 +1,199 @@
+---
+title: "hiPSCi cell line evaluation (all differentiations) - iPSC figures"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(igraph)
+library(dplyr)
+#library(schex)
+library(wesanderson)
+library(ComplexHeatmap)
+library(circlize)
+library(pals)
+library(ggrastr)
+library(ggedit)
+theme_set(theme_cowplot())
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+```{r}
+color_palette = c("#c4eadd", "#d098d7", "#dce496", "#bab5ff", "#f9d08b", "#5bb4ef", "#e1ad71", "#16c4e8", "#ffa3c6", "#4ec9b1", "#de9a98", "#22c0ba", "#ffbfb2", "#62be93", "#ffcfe0", "#c0ffdb", "#a5b17a", "#abebff", "#e0ffd0", "#9dc4b8", "#affff5")
+
+cell_Line_palette = c("#999999", "#5566AA", "#558866", "#AADDCC", "#DDCC66","#99bb55", "#BB0011")
+```
+
+# iPSC figures
+
+```{r}
+differentiations = c("iPSC")
+differentiations_sce_objects = lapply(differentiations, function(d){
+  merged_sce_object = readRDS(paste0(d, "/dc_cell.rds"))
+  sce_object_mnn = readRDS(paste0(d, "/clustered_cell_cc.rds"))
+  
+  # Subset the merged_sce_object to include only cells found in sce_object_mnn
+  merged_sce_object = merged_sce_object[, paste0(merged_sce_object$Sample, ".", merged_sce_object$Barcode) %in% paste0(sce_object_mnn$Sample, ".", sce_object_mnn$Barcode)]
+  
+  # Rearrange the sce_object_mnn to match the ordering of merged_sce_object
+  colnames(sce_object_mnn) = paste0(sce_object_mnn$Sample, ".", sce_object_mnn$Barcode)
+  sce_object_mnn = sce_object_mnn[, paste0(merged_sce_object$Sample, ".", merged_sce_object$Barcode)]
+  
+  merged_sce_object$cluster = sce_object_mnn$cluster
+  merged_sce_object$Phase = sce_object_mnn$Phase
+  
+  # Transfer the reducedDim representation and trim it to the first 2 dim only
+  for (reduced_dim in names(reducedDims(sce_object_mnn))) {
+    reducedDim(merged_sce_object, reduced_dim) = reducedDim(sce_object_mnn, reduced_dim)[,c(1:2)]
+  }
+  
+  # Fix name for KOLF2 line
+  merged_sce_object$vireo_assignment = gsub("KOLF2", "KOLF2.1J", merged_sce_object$vireo_assignment)
+  
+  merged_sce_object
+})
+names(differentiations_sce_objects) = differentiations
+(ipsc_sce_object = differentiations_sce_objects$iPSC)
+```
+
+```{r}
+ipsc_sce_object$cell_line = gsub("-.*", "", as.character(ipsc_sce_object$vireo_assignment))
+ipsc_sce_object$cell_line = gsub("NN0003932", "NN_combined", ipsc_sce_object$cell_line)
+```
+
+```{r, fig.width=6, fig.height=2.1}
+marker_genes = c("SOX2", "POU5F1", "NANOG", "UTF1", "MT2A", "PDGFA")
+
+cell_line_plot = plotUMAP(ipsc_sce_object, colour_by="cell_line", point_size=0.75) + 
+  scale_colour_manual(name="Line", values=cell_Line_palette) +
+  guides(colour = guide_legend(override.aes = list(shape = 15, size=3))) +
+  theme(legend.position = "none") + rasterise(geom_point(mapping = aes(col=colour_by), alpha=0.6, size=0.75), dpi=600)
+cell_line_plot = cell_line_plot %>% remove_geom('point', 1)
+
+marker_expression_plots = lapply(marker_genes, function(m){
+  title = ggdraw() + 
+  draw_label(
+    m,
+    fontface = 'bold',
+    hjust = 0.5,
+    size=12
+  ) +
+  theme(
+    # add margin on the left of the drawing canvas,
+    # so title is aligned with left edge of first plot
+    plot.margin = margin(0, 0, 0, 7)
+  )
+  
+  if (m %in% c("SOX2", "POU5F1", "NANOG")) {
+     violin_expression_plot = plotExpression(ipsc_sce_object, features = m, x = "cell_line", colour_by = "cell_line", point_size=0.75) + 
+       labs(y="Logcounts") +
+       theme(strip.background = element_blank(), strip.text.x = element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank()) +
+       theme(legend.position = "none") +
+       labs(x=NULL) + 
+       scale_colour_manual(name="Line", values=cell_Line_palette) +
+       geom_quasirandom_rast(mapping = aes(col=colour_by), alpha=1, size=0.3, width=0.4, groupOnX=TRUE, bandwidth=1, dpi=600, dev = "ragg_png")
+    violin_expression_plot = violin_expression_plot %>% remove_geom('point', 1)
+  
+  } else {
+    violin_expression_plot = plotExpression(ipsc_sce_object, features = m, x = "cell_line", colour_by = "cell_line", point_size=0.75) + 
+       labs(y="Logcounts") +
+       theme(strip.background = element_blank(), strip.text.x = element_blank()) +
+       theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none") +
+       theme(legend.position = "none") +
+       labs(x=NULL) + 
+       scale_colour_manual(name="Line", values=cell_Line_palette) +
+       geom_quasirandom_rast(mapping = aes(col=colour_by), alpha=1, size=0.3, width=0.4, groupOnX=TRUE, bandwidth=1, dpi=600, dev = "ragg_png")
+    violin_expression_plot = violin_expression_plot %>% remove_geom('point', 1)
+  }
+  
+  plot_grid(title, violin_expression_plot, ncol=1, rel_heights=c(0.1, 1)) # rel_heights values control title margins
+})
+
+plot_grid(cell_line_plot, plot_grid(plotlist = marker_expression_plots, ncol=3, rel_heights = c(0.7,1)), rel_widths = c(1,2))
+ggsave("figure_1_vertical.pdf", height = 4.2, width = 12, units = "in", colormodel = "cmyk")
+ggsave("figure_1_vertical.png", height = 4.2, width = 12, units = "in", dpi=600)
+```
+
+
+```{r, fig.width=2, fig.height=4}
+sample_contributions = as.data.frame.table(table(sample=ipsc_sce_object$Sample, cell_line=ipsc_sce_object$cell_line))
+colnames(sample_contributions) = c("Sample", "Cell line", "Count")
+sample_contributions$Sample = gsub("(Sample_|_hN.*)", "", sample_contributions$Sample)
+  
+cell_line_breakdown = ggplot(data=sample_contributions, mapping = aes(x=Sample, y=Count, fill=`Cell line`)) +
+geom_bar(stat="identity") + 
+scale_x_discrete() +
+labs(x=NULL)+
+geom_text(aes(label=Count), position=position_stack(vjust=0.5), colour="white") +
+labs(fill="") +
+scale_fill_manual(values=cell_Line_palette) +
+  theme(legend.position = "bottom", axis.ticks.x=element_blank(), axis.text.x=element_blank())
+#ggsave("ipsc_cell_line_breakdown.pdf", height = 8, width = 4, units = "in", colormodel = "cmyk")
+```
+
+```{r}
+umap_cluster_by_line = plotUMAP(ipsc_sce_object, colour_by="cluster", other_fields = "cell_line") + 
+  scale_color_manual(name="Cluster", values = color_palette) + 
+  facet_wrap(~cell_line, ncol=7) + 
+  rasterise(geom_point(mapping = aes(col=colour_by), alpha=0.6, size=0.75), dpi=600) + 
+  theme(axis.text.x=element_blank(), axis.text.y=element_blank(), axis.ticks.x=element_blank(), axis.ticks.y=element_blank()) 
+umap_cluster_by_line = umap_cluster_by_line %>% remove_geom('point', 1)
+    
+umap_cellcycle_by_line = plotUMAP(ipsc_sce_object, colour_by="Phase", other_fields = "cell_line") + 
+  facet_wrap(~cell_line, ncol=7) + 
+  rasterise(geom_point(mapping = aes(col=colour_by), alpha=0.6, size=0.75), dpi=600) + 
+  theme(axis.text.x=element_blank(), axis.text.y=element_blank(), axis.ticks.x=element_blank(), axis.ticks.y=element_blank())
+umap_cellcycle_by_line = umap_cellcycle_by_line %>% remove_geom('point', 1)
+```
+
+```{r}
+ipsc_sce_object_by_line = readRDS("iPSC/sce_objects_by_line_cc.rds")
+names(ipsc_sce_object_by_line) = lapply(ipsc_sce_object_by_line, function(sce_object) gsub("-.*", "", sce_object$vireo_assignment[1]))
+names(ipsc_sce_object_by_line) = gsub("KOLF2", "KOLF2.1J", names(ipsc_sce_object_by_line))
+names(ipsc_sce_object_by_line) = gsub("NN0003932", "NN_combined", names(ipsc_sce_object_by_line))
+```
+
+```{r}
+marker_expression_plots = lapply(marker_genes, function(m){
+  umap_expression_plot = plotUMAP(ipsc_sce_object, colour_by=m, point_size=0.75) + theme(legend.position="bottom", legend.title = element_blank(), legend.text = element_blank(), legend.key.height = unit(0.25, 'cm'), legend.justification="right", legend.margin=margin(0,0,0,0), legend.box.margin=margin(-8,0,-2,0), axis.text.x=element_blank(), axis.text.y=element_blank(), axis.ticks.x=element_blank(), axis.ticks.y=element_blank()) + 
+      viridis::scale_colour_viridis(option="G") + rasterise(geom_point(mapping = aes(col=colour_by), alpha=0.6, size=0.75), dpi=600) + ggtitle(m)
+  umap_expression_plot = umap_expression_plot %>% remove_geom('point', 1)
+  umap_expression_plot
+})
+```
+
+
+```{r, fig.width=10, fig.height=6}
+plot_grid(plot_grid(cell_line_breakdown, plot_grid(umap_cluster_by_line, umap_cellcycle_by_line, ncol=1), ncol=2, rel_widths = c(0.15,1)),
+  plot_grid(plotlist=(marker_expression_plots), nrow=1),
+  plot_grid(plotlist = c(lapply(sort(names(ipsc_sce_object_by_line)), function(line) {
+    sce_object = ipsc_sce_object_by_line[[line]]
+    plotUMAP(sce_object, colour_by="cluster", text_by="cluster") + scale_fill_manual(values = color_palette) + scale_color_manual(values = color_palette) + ggtitle(paste(line)) + theme(legend.position = "none", axis.text.x=element_blank(), axis.text.y=element_blank(), axis.ticks.x=element_blank(), axis.ticks.y=element_blank()) 
+  }),
+  lapply(sort(names(ipsc_sce_object_by_line)), function(line) {
+    sce_object = ipsc_sce_object_by_line[[line]]
+    plotUMAP(sce_object, colour_by="Phase", text_by="Phase") + ggtitle(paste(line)) + theme(legend.position = "none", axis.text.x=element_blank(), axis.text.y=element_blank(), axis.ticks.x=element_blank(), axis.ticks.y=element_blank())
+  })), ncol=7),
+  ncol=1, rel_heights = c(2.5,1.7,2.5))
+ggsave("sup_figure_1.pdf", height = 12, width = 15, units = "in", colormodel = "cmyk")
+```
+

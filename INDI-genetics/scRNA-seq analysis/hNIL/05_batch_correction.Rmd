@@ -1,0 +1,120 @@
+---
+title: "hiPSCi cell line evaluation (hNIL) - 05 Batch correction"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(dplyr)
+theme_set(theme_cowplot())
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+For this experiment, we have 4 samples which have been multiplexed by genotype. We have two different pooling strategy used:
+
+ 1. Pool 1 and 2 conditions: The 8 ipsc lines were differentiated in separate wells (n=2, total of 16 wells) from day 1 to 18. On day 18 the cells were papain-dissociated and pooled the eight lines into one single tube (n=2) to proceed with 10x genomics experiment.
+ 2. Combined 1 and 2 conditions: The 8 ipsc lines were differentiated in separate wells (n=2, total of 16 wells) from day 1 to 3.  On day 3 the 8 lines were pooled into one well (n=2) and continue differentiation until day 18.  On day 17 the cells were papain-dissociated to proceed with 10x genomics experiment.
+
+- Sample Pool1: hNIL pool cell line 1-8 replicate 1
+- Sample Pool2: hNIL pool cell line 1-8 replicate 2
+- Sample Combined1: hNIL combined cell line 1-8 replicate 1
+- Sample Combined2: hNIL combined cell line 1-8 replicate 2
+
+# Batch correction
+
+```{r}
+merged_sce_object = readRDS("dc_cell.rds")
+
+# To properly perform batch correction, we need to remove doublets first
+merged_sce_object = merged_sce_object[, colData(merged_sce_object)$final_doublet_call == "Singlet"]
+```
+
+For the modeling of gene-variance relationship, we will again remove MT and Ribosomal genes due to the issue we see during doublet detection.
+
+```{r, fig.height=3}
+set.seed(1000)
+non_mito_ribo_genes = rownames(merged_sce_object)[grep(pattern = "^(MT-|RP[LS]|MALAT1)", rownames(merged_sce_object), invert = TRUE)]
+dec_combined = modelGeneVar(merged_sce_object, subset.row=non_mito_ribo_genes, block=merged_sce_object$Sample)
+hvg_combined = getTopHVGs(dec_combined)
+length(hvg_combined)
+```
+
+```{r}
+trend_plotlist = lapply(1:length(dec_combined$per.block), function (i){
+  sample = names(dec_combined$per.block)[[i]]
+  fit = metadata(dec_combined$per.block[[i]])
+ggplot(data = data.frame(mean = fit$mean, var = fit$var, name=ifelse(fit$mean > 4 | fit$var > 2, names(fit$mean), NA)),
+                mapping = aes(x = mean, y = var, label=name)) +
+  geom_point() +
+  ggtitle(sample) +
+  labs(x = "Mean log-expression", y = "Variance of log-expression") +
+  stat_function(fun=fit$trend, colour="dodgerblue", size=1)
+})
+
+plot_grid(plotlist = trend_plotlist, ncol=2)
+```
+
+```{r}
+set.seed(1000)
+sce_object_mnn = correctExperiments(merged_sce_object, 
+                                    batch = merged_sce_object$Sample,
+                                    subset.row = hvg_combined,
+                                    PARAM=FastMnnParam(
+                                      merge.order=list(
+                                        list("Sample_Combined1_hNIL", "Sample_Combined2_hNIL"),
+                                        list("Sample_Pool1_hNIL", "Sample_Pool2_hNIL")
+                                      )
+                                    ))
+```
+
+Let's run UMAP for visualisation.
+
+```{r}
+set.seed(1000)
+sce_object_mnn = runUMAP(sce_object_mnn, ncomponents=2, dimred="corrected", spread = 1, min_dist = 0.4)
+```
+
+Let's also calculate the UMAP for the unmerged dataset so we can do comparison.
+
+```{r}
+set.seed(1000)
+merged_sce_object = runPCA(merged_sce_object, subset_row=hvg_combined)
+merged_sce_object = runUMAP(merged_sce_object, ncomponents=2, dimred="PCA", spread = 1, min_dist = 0.4)
+```
+
+```{r, fig.width=10, fig.height=5}
+plot_grid(plotUMAP(merged_sce_object, colour_by="Sample") + ggtitle("Original"), 
+          plotUMAP(sce_object_mnn, colour_by="Sample") + ggtitle("Final"))
+```
+
+```{r}
+plotUMAP(merged_sce_object, colour_by="Sample", other_fields="Sample") + ggtitle("Original") + facet_wrap(~Sample) + theme(legend.position = "none")
+plotUMAP(sce_object_mnn, colour_by="Sample", other_fields="Sample") + ggtitle("Final") + facet_wrap(~Sample) + theme(legend.position = "none")
+```
+
+
+
+```{r}
+saveRDS(sce_object_mnn, "all_corrections.rds")
+```
+
+

@@ -1,0 +1,189 @@
+---
+title: "hiPSCi cell line evaluation (all differentiations) - Differentiation annotation and marker expression"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(igraph)
+library(dplyr)
+#library(schex)
+library(wesanderson)
+library(ComplexHeatmap)
+library(circlize)
+library(pals)
+library(ggrastr)
+library(ggedit)
+theme_set(theme_cowplot())
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+```{r}
+color_palette = list(
+  "hypothalamus"=c("#54c2af", "#c24dac", "#52bc59", "#9c5bce", "#98b946", "#626cd4", "#cba94a", "#6471b6", "#5b8436", "#d34680", "#3f8f64", "#ce473e", "#5ea5db", "#cf7941", "#c584c4", "#887031", "#ba6271"),
+  "cortical"=c("#96e97c", "#074d65", "#23dbe1", "#1b4dab", "#a6b6f9", "#762aac", "#997cfb", "#285d28", "#d3d6c1", "#6e390d", "#65a10e", "#d60724", "#e3d769"),
+  "hNGN2"=c("#c3ae81", "#7e8cdc", "#a3d37d", "#cd8fd5", "#57ad6a", "#de7b70", "#78d6af", "#d78ea8", "#9aa850", "#85aad6", "#cf9554","#63c8d7", "#62a38d"),
+  "hNIL"=c("#75859d", "#5c0d47", "#539322", "#4a1999", "#4081ec", "#1b511d", "#f90da0", "#173d61", "#c7628e", "#2f937a", "#6b2402", "#9c6ae4", "#473a0a")
+)
+
+cell_Line_palette = c("#999999", "#5566AA", "#558866", "#AADDCC", "#DDCC66","#99bb55", "#BB0011")
+```
+
+# Marker gene expression
+
+We want to evaluate the performance of each cell line in terms of differentiation efficiency to target cell type across all differentiations.
+
+For each differentiations, we have annotated each clusters with their cell type and class of cell type (target neuron, neuron or progenitor/other).
+
+## Data loading
+
+Let's first load the annotation
+
+```{r}
+cluster_annotations = read.csv("cluster_annotation_16052021.csv", stringsAsFactors = F)
+cluster_annotations$ClusterID = as.integer(gsub("[a-zA-Z]+", "", cluster_annotations$Cluster))
+```
+
+Let's load all the differentiations and assign the cell identity to each differentiations.
+
+```{r}
+differentiations = c("hypothalamus", "cortical", "hNGN2", "hNIL")
+differentiations_sce_objects = lapply(differentiations, function(d){
+  merged_sce_object = readRDS(paste0(d, "/dc_cell.rds"))
+  sce_object_mnn = readRDS(paste0(d, "/clustered_cell.rds"))
+  
+  # Subset the merged_sce_object to include only cells found in sce_object_mnn
+  merged_sce_object = merged_sce_object[, paste0(merged_sce_object$Sample, ".", merged_sce_object$Barcode) %in% paste0(sce_object_mnn$Sample, ".", sce_object_mnn$Barcode)]
+  
+  # Rearrange the sce_object_mnn to match the ordering of merged_sce_object
+  colnames(sce_object_mnn) = paste0(sce_object_mnn$Sample, ".", sce_object_mnn$Barcode)
+  sce_object_mnn = sce_object_mnn[, paste0(merged_sce_object$Sample, ".", merged_sce_object$Barcode)]
+  
+  merged_sce_object$cluster = sce_object_mnn$cluster
+  
+  # Add in the cluster annotation and cell type classification
+  cluster_differentiation_annotation = cluster_annotations[cluster_annotations$Differentiation == d, ]
+  cluster_differentiation_annotation = cluster_differentiation_annotation[order(cluster_differentiation_annotation$ClusterID), ]
+  cluster_differentiation_annotation$Annotation = make.unique(cluster_differentiation_annotation$Annotation, sep = " ")
+  
+  merged_sce_object$annotation = sapply(merged_sce_object$cluster, function(i) cluster_differentiation_annotation$Annotation[i])
+  merged_sce_object$annotation_category = sapply(merged_sce_object$cluster, function(i) cluster_differentiation_annotation$Annotation.category[i])
+  
+  # Transfer the reducedDim representation and trim it to the first 2 dim only
+  for (reduced_dim in names(reducedDims(sce_object_mnn))) {
+    reducedDim(merged_sce_object, reduced_dim) = reducedDim(sce_object_mnn, reduced_dim)[,c(1:2)]
+  }
+  
+  # Fix name for KOLF2 line
+  merged_sce_object$vireo_assignment = gsub("KOLF2", "KOLF2.1J", merged_sce_object$vireo_assignment)
+  
+  merged_sce_object
+})
+names(differentiations_sce_objects) = differentiations
+differentiations_sce_objects
+```
+
+## Figures
+
+```{r}
+selected_markers = list(
+  "cortical" = c("GAP43", "STMN2", "MAP2", "VIM", "VCAN", "FABP7", "PLS3", "METRN", "FGF8", "TTR", "GRIA2", "SLC3A2", "NNAT", "GAD2", "TBR1", "TOP2A", "NEUROG1", "DUSP6"),
+  "hypothalamus" = c("GAP43", "STMN2", "VIM", "FABP7", "SLC17A6", "HCRT", "PRRX1", "EMX2", "FGF8", "FOXD1", "GAD2", "SLC32A1", "ZFHX3", "SLC3A2", "TBR1", "CRABP1", "NEUROG1", "WLS", "SLC18A3", "LHX1", "TOP2A", "PCP4", "SST", "POMC"),
+  "hNGN2" = c("GAP43", "STMN2", "METRN", "VIM", "SLC17A7", "FABP7", "TOP2A", "ONECUT3", "SLC17A6", "ISL1", "SLC18A3", "GRIA2", "SOX11", "NNAT", "DLL3", "ONECUT2"),
+  "hNIL" = c("GAP43", "STMN2", "ONECUT2", "ISL1", "FOXG1", "DLK1", "WLS", "SNCA", "TOP2A", "VIM", "DLL3", "SOX10", "S100B", "PAX6", "DUSP1", "PRRX1", "RAX"))
+```
+
+#### Violin plot
+
+```{r, fig.width=6, fig.height=3}
+extract_max = function(p){
+  ymax = max(ggplot_build(p)$layout$panel_scales_y[[1]]$range$range)
+  return(ceiling(ymax))
+}
+
+horizontal_violins = lapply(names(differentiations_sce_objects), function(diff) {
+  print(diff)
+  sce_object = differentiations_sce_objects[[diff]]
+  markers = unique(selected_markers[[diff]])
+  
+  marker_plots = lapply(1:length(unique(selected_markers[["hypothalamus"]])), function(i){
+    if (i <= length(markers)) {
+      marker = markers[[i]]
+      p = plotExpression(sce_object, marker, x="cluster", colour_by = "cluster", point_size=0.1) + 
+        theme_nothing() +
+        scale_colour_manual(values=color_palette[[diff]]) +
+        ylab(marker) + xlab("") +
+        theme(legend.position = "none", 
+          strip.background = element_blank(),
+          strip.text.y = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(), 
+          axis.title.x = element_text(size = rel(1), angle=45, vjust = 0.5, hjust=1, margin = margin(t=-3)), 
+          axis.text.x = element_text(size = rel(1)), 
+          axis.line = element_line(),
+          plot.margin = unit(c(-3, 0, -3, 0), "cm")
+        ) + coord_flip() + geom_quasirandom_rast(mapping = aes(col=colour_by), alpha=1, size=0.1, width=0.4, groupOnX=TRUE, bandwidth=1, dpi=600, dev = "ragg_png")
+      p %>% remove_geom('point', 1)
+    } else {
+      patchwork::plot_spacer() + theme_nothing() + theme(plot.margin = unit(c(-3, 0, -3, 0), "cm"))
+    }
+  })
+  
+  
+  marker_plots[[1]] = marker_plots[[1]] +
+    theme(axis.text.y=element_text(), axis.ticks.y = element_line(), axis.title.x = element_text()) + xlab("cluster")
+  
+  xmaxs = purrr::map_dbl(marker_plots, extract_max)
+  marker_plots = purrr::map2(marker_plots, xmaxs, function(x,y) x + 
+                            scale_y_continuous(breaks = c(y)) + 
+                            expand_limits(y = y))
+  
+  patchwork::wrap_plots(marker_plots, nrow=1)
+})
+names(horizontal_violins) = names(differentiations_sce_objects)
+```
+
+## Suplementary figure
+
+```{r, fig.width=12, fig.height=13}
+plot_grid(plotlist = lapply(differentiations, function(d){
+  sce_object = differentiations_sce_objects[[d]]
+  diff_annotation = cluster_annotations[cluster_annotations$Differentiation == d, ]
+  diff_annotation$Annotation = make.unique(diff_annotation$Annotation, sep = " ")
+  sce_object$annotation = factor(stringr::str_wrap(paste0(sce_object$cluster, " - ", sce_object$annotation), width=50), levels=stringr::str_wrap(paste0(diff_annotation$ClusterID, " - ", diff_annotation$Annotation), width=50))
+  plots = plot_grid(
+      remove_geom(plotUMAP(sce_object, colour_by="annotation") + scale_colour_manual(name="Annotation", values = color_palette[[d]]) + ggtitle(paste0(d)) + theme(legend.position = "none") + rasterise(geom_point(mapping = aes(col=colour_by), alpha=0.6, size=0.75), dpi=600), "point", 1),
+      get_legend(plotUMAP(sce_object, colour_by="annotation", point_alpha=1) + scale_colour_manual(name="Annotation", values = color_palette[[d]]) + guides(colour = guide_legend(override.aes = list(size=3))) + theme(legend.text = element_text(size=15), legend.title = element_text(size=17), legend.key.size = unit(0.5,"cm"), legend.margin = margin(l=35))),
+      horizontal_violins[[d]],
+      ncol=3, rel_widths = c(1,1,2)
+    )
+  
+  if (d != differentiations[[length(differentiations)]]) {
+    plots = plot_grid(plots, NULL, ncol=1, rel_heights = c(1, 0.1))
+  }
+  
+  plots
+}), ncol=1)
+ggsave("sup_figure_5.pdf", height = 24, width = 24, units = "in", colormodel = "cmyk")
+ggsave("sup_figure_5.png", height = 24, width = 24, units = "in", dpi = 600)
+```
+

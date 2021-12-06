@@ -1,0 +1,691 @@
+---
+title: "hiPSCi cell line evaluation (cortical) - 04 Doublet detection"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(scds)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(dplyr)
+library(igraph)
+library(ggrepel)
+theme_set(theme_cowplot())
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+For this experiment, we have 2 samples which have been multiplexed by both genotype and replicate (using multiseq sample labelling). In the cortical differentiation, all the cell lines were pooled together before differentiation. Furthermore, we have 6 replicates overall from 3 different operator with 2 technical replicates each.
+
+- Sample SIGAE1: Cortical differentiation cell line 1-8 user 1-3 technical replicate 1 
+- Sample SIGAF1: Cortical differentiation cell line 1-8 user 1-3 technical replicate 2
+
+# Doublet detection
+
+```{r}
+merged_sce_object = readRDS("norm_cell.rds")
+```
+
+## Per sample doublet detection
+
+```{r}
+sce_object = lapply(unique(merged_sce_object$Sample), function(x) merged_sce_object[, merged_sce_object$Sample == x])
+```
+
+### Doublet score calculation with Hybrid2 method
+
+For the doublet score calculation, we are utilising the Hybrid2 approach as evaluated by Leah to be one of the better performing doublet detection method. This involves using the scds hybrid method to identify doublet, followed by identifying neighbouring 'guilty' doublet (hence the 2 in Hybrid2 naming).
+
+#### Compute hybrid doublet
+
+We will first identify doublet using scds hybrid method, which combines the co-expression based doublet detection approach from cxds and binary classification based doublet detection approach from scds.
+
+```{r}
+set.seed(1000)
+doublet_call = lapply(1:length(sce_object), function(i) {
+  non_doublet_sce_object = sce_object[[i]][, sce_object[[i]]$vireo_assignment != "doublet" & sce_object[[i]]$multiseq_assignment != "Doublet"]
+  non_doublet_call = colData(cxds_bcds_hybrid(non_doublet_sce_object, estNdbl = TRUE))$hybrid_call
+  names(non_doublet_call) = non_doublet_sce_object$Barcode
+  non_doublet_call[sce_object[[i]]$Barcode]
+})
+```
+
+```{r}
+lapply(doublet_call, table)
+```
+
+#### Guilty neighbouring doublet detection
+
+The next step of the hybrid2 method is the nearest neighbour guilt-by-association doublet cells. Briefly, for each cell, we find the top 10 nearest neighbour and calculate the proportion of neighbouring cells which are identified as doublet. If the proportion of the doublet neighbour for the cell is higher than the proportion of doublet called using the hybrid method, we classify the cells as a 'guilty' doublet.
+
+##### Identifying highly variable genes
+
+For this, we will need to to first select highly variable genes since finding the reduced dimension and identifying nearest neighbour is mainly done using HVG only. We will use the recommended top 10% gene rather than using fdr.threshold for now since it doesn't necessarily make sense to use fdr at this point (see OSCA).
+
+```{r}
+set.seed(1000)
+dec_object= lapply(sce_object, modelGeneVar)
+hvg_list = lapply(dec_object, getTopHVGs, prop=0.1)
+```
+
+Let's have a quick look at some qc plots from the decomposed variance and highly variable gene using variance of the log counts
+
+```{r, fig.height=2}
+trend_plotlist = lapply(1:length(dec_object), function(i) {
+  sce = sce_object[[i]]
+  fit = metadata(dec_object[[i]])
+  sample_name = sce$Sample[1]
+  ggplot(data = data.frame(mean = fit$mean, var = fit$var, name=ifelse(fit$mean > 3 | fit$var > 2, names(fit$mean), NA)),
+                mapping = aes(x = mean, y = var, label=name)) +
+    geom_point() +
+    labs(x = "Mean log-expression", y = "Variance of log-expression") +
+    ggtitle(sample_name) +
+    stat_function(fun=fit$trend, colour="dodgerblue", size=1) + 
+    geom_text_repel(force=10)
+})
+
+plot_grid(plotlist = trend_plotlist, ncol=2)
+```
+
+We can see some effect of the mitochondrial and ribosomal genes on the modelled gene variance curve. Let's see where all the MT and RP genes are
+
+```{r, fig.height=2}
+trend_plotlist = lapply(1:length(dec_object), function(i) {
+  sce = sce_object[[i]]
+  fit = metadata(dec_object[[i]])
+  sample_name = sce$Sample[1]
+  mt_ribo_genes = rownames(sce_object[[1]])[grep(pattern = "^(MT-|RP[LS]|MALAT1)", rownames(sce))]
+  data = data.frame(mean = fit$mean, var = fit$var, col = ifelse(names(fit$mean) %in% mt_ribo_genes, "mt-ribo", "other"))
+  ggplot(data = data, mapping = aes(x = mean, y = var, col=col)) +
+    geom_point() +
+    labs(x = "Mean log-expression", y = "Variance of log-expression") +
+    ggtitle(sample_name) +
+    stat_function(fun=fit$trend, colour="dodgerblue", size=1.5) +
+    theme(legend.position = "none") 
+})
+
+plot_grid(plotlist = trend_plotlist)
+```
+
+Due to this effect, which can also be seen in a few other differentiation, we will remove the mitochondrial and ribosomal genes for modelling gene variance.
+
+```{r, fig.height=2}
+non_mito_ribo_genes = rownames(sce_object[[1]])[grep(pattern = "^(MT-|RP[LS]|MALAT1)", rownames(sce_object[[1]]), invert = TRUE)]
+dec_object_subset = lapply(sce_object, function(sce){
+  modelGeneVar(sce, subset.row=non_mito_ribo_genes)
+})
+
+trend_plotlist = lapply(1:length(dec_object_subset), function(i) {
+  sce = sce_object[[i]]
+  fit = metadata(dec_object_subset[[i]])
+  sample_name = sce$Sample[1]
+  ggplot(data = data.frame(mean = fit$mean, var = fit$var, name=ifelse(fit$mean > 6, names(fit$mean), NA)),
+                mapping = aes(x = mean, y = var, label=name)) +
+    geom_point() +
+    labs(x = "Mean log-expression", y = "Variance of log-expression") +
+    ggtitle(sample_name) +
+    stat_function(fun=fit$trend, colour="dodgerblue", size=1) + 
+    geom_text_repel()
+})
+
+plot_grid(plotlist = trend_plotlist)
+```
+
+```{r}
+hvg_list_subset = lapply(dec_object_subset, getTopHVGs, prop=0.5)
+lapply(hvg_list_subset, length)
+```
+
+##### Finding nearest neighbour of doublets
+
+```{r}
+set.seed(1000)
+sce_object = lapply(1:length(sce_object), function(i) {
+  denoisePCA(sce_object[[i]][non_mito_ribo_genes,], technical = dec_object_subset[[i]], subset.row = hvg_list_subset[[i]], BSPARAM = IrlbaParam())
+})
+```
+
+```{r}
+set.seed(1000)
+neighbourhood_doublet_call = lapply(1:length(sce_object), function(i){
+  knn_neighbours = BiocNeighbors::findKNN(reducedDim(sce_object[[i]], "PCA"), k=5)
+  doublet_neighbour_proportion = apply(knn_neighbours$index, 1, function(x) {
+    doublet_neighbour_count = table(doublet_call[[i]][x])
+    ifelse("TRUE" %in%names (doublet_neighbour_count), doublet_neighbour_count[["TRUE"]]/length(x), 0)
+  })
+  data.frame(doublet_proportion=doublet_neighbour_proportion, 
+             neighbourhood_doublet_call=doublet_neighbour_proportion > (table(doublet_call[[i]])[["TRUE"]]/dim(sce_object[[i]][, sce_object[[i]]$vireo_assignment != "doublet" & sce_object[[i]]$multiseq_assignment != "Doublet"])[[2]]), 
+             row.names=sce_object[[i]]$Barcode)
+})
+```
+
+```{r}
+lapply(neighbourhood_doublet_call, function(x) table(x$neighbourhood_doublet_call))
+```
+
+##### Determining final hybrid2 doublet call
+
+```{r}
+hybrid2_doublet_call = lapply(1:length(sce_object), function(i) {
+  doublet_combined_call = cbind(data.frame(hybrid_call=doublet_call[[i]]), neighbourhood_doublet_call[[i]])
+  doublet_combined_call$hybrid2_doublet_call = doublet_combined_call$hybrid_call | doublet_combined_call$neighbourhood_doublet_call
+  doublet_combined_call
+})
+```
+
+```{r}
+lapply(hybrid2_doublet_call, function(x) table(x$hybrid2_doublet_call))
+```
+
+### Guilty cluster doublet detection
+
+We now want to remove subclusters with higher than expected vireo doublet fraction or hybrid2 doublet fraction.
+
+```{r}
+set.seed(1000)
+clusters = lapply(1:length(sce_object), function(i) {
+  x = sce_object[[i]]
+  graph = buildSNNGraph(x, use.dimred="PCA", BSPARAM=IrlbaParam(), BPPARAM=mcparam)
+  clusters = cluster_louvain(graph)
+  clusters$membership
+})
+```
+
+```{r}
+lapply(clusters, table)
+```
+
+Now that we have cluster label for each cell, we want to perform further sub-clustering in order to form a more fine-grained cluster to allow us to better identify doublet cluster.
+
+```{r}
+set.seed(1000)
+subclusters = lapply(1:length(sce_object), function(i){
+  x = sce_object[[i]]
+  subclust = quickSubCluster(x, groups = clusters[[i]], 
+                             prepFUN = function(x) {
+                               dec = modelGeneVar(x) # The MT and RP genes are not used for modelling gene variance relationship as they are not present in the sce_object
+                               input = denoisePCA(x, technical=dec, subset.row=getTopHVGs(dec, prop=0.5), BSPARAM = IrlbaParam())
+                             }, 
+                             clusterFUN = function(x) {
+                               graph = buildSNNGraph(x, use.dimred="PCA", BSPARAM=IrlbaParam())
+                               cluster_louvain(graph)$membership
+                             })
+  subclust_membership = lapply(subclust, function(x){
+    sc = colData(x)$subcluster
+    names(sc) = colData(x)$Barcode
+    sc
+  })
+  subclust_membership = Reduce(c, subclust_membership)
+  subclust_membership[colData(x)$Barcode]
+})
+```
+
+Let's run UMAP for visualisation of doublet score and doublet clusters.
+
+```{r}
+set.seed(1000)
+umap_coord = lapply(sce_object, calculateUMAP)
+```
+
+Now let's visualise the doublet score, clusters (and sub-clusters formed) as well as umi and feature information to see if there is any relationship between them.
+
+```{r, fig.width=10, fig.height=8}
+lapply(1:length(sce_object), function(i){
+  coord = umap_coord[[i]]
+  sample_name = sce_object[[i]]$Sample[1]
+  
+  total_counts = Matrix::colSums(counts(sce_object[[i]]))
+  total_features_by_counts = Matrix::colSums(counts(sce_object[[i]]) > 0)
+  
+  umi_count = ggplot(as.data.frame(coord), aes(x = V1, y = V2, colour = log2(total_counts))) +
+    geom_point(size = 0.5) + 
+    theme_classic() + 
+    scale_color_viridis() +
+    labs(title=paste(sample_name, "- UMI count", sep=" "), colour="log2(total umi)")+
+    theme(legend.position = "right", legend.key.size = unit(0.4,"cm"), legend.key.width = unit(0.2,"cm"), legend.text = element_text(size=10))
+  
+  gene_count = ggplot(as.data.frame(coord), aes(x = V1, y = V2, colour = log2(total_features_by_counts))) +
+    geom_point(size = 0.5) + 
+    theme_classic() +
+    scale_color_viridis() +
+    labs(title=paste(sample_name, "- Feature by counts", sep=" "), colour="log2(total gene)") +
+    theme(legend.position = "right", legend.key.size = unit(0.4,"cm"), legend.key.width = unit(0.2,"cm"), legend.text = element_text(size=10))
+  
+  hybrid_call = factor(hybrid2_doublet_call[[i]]$hybrid_call, levels=c(FALSE, TRUE))
+  hybrid_call = plyr::revalue(hybrid_call, c("FALSE" = "singlet", "TRUE" = "doublet"))
+  hybrid_score_plot = ggplot(as.data.frame(coord), aes(x = V1, y = V2, colour = hybrid_call)) +
+    geom_point(size = 0.5) + 
+    theme_classic() + 
+    labs(title=paste(sample_name, "- hybrid call", sep=" ")) +
+    scale_colour_manual(values = c("#b5d3b4", "#cc8fe7")) +
+    theme(legend.position = "bottom", legend.key.size = unit(0.4,"cm"), legend.key.width = unit(1,"cm"),  legend.text = element_text(size=10))
+  
+  hybrid2_call = factor(hybrid2_doublet_call[[i]]$hybrid2_doublet_call, levels=c(FALSE, TRUE))
+  hybrid2_call = plyr::revalue(hybrid2_call, c("FALSE" = "singlet", "TRUE" = "doublet"))
+  hybrid2_score_plot = ggplot(as.data.frame(coord), aes(x = V1, y = V2, colour = hybrid2_call)) +
+    geom_point(size = 0.5) + 
+    theme_classic() + 
+    labs(title=paste(sample_name, "- hybrid2 call", sep=" ")) +
+    scale_colour_manual(values = c("#b5d3b4", "#cc8fe7")) +
+    theme(legend.position = "bottom", legend.key.size = unit(0.4,"cm"), legend.key.width = unit(1,"cm"),  legend.text = element_text(size=10))
+  
+  cluster_plot = ggplot(as.data.frame(coord), aes(x = V1, y = V2, colour = factor(clusters[[i]]))) +
+    geom_point(size = 0.5) + 
+    theme_classic() + 
+    labs(title=paste(sample_name, "- cluster", sep=" ")) +
+    theme(legend.position = "none")
+  
+  subcluster_plot = ggplot(as.data.frame(coord), aes(x = V1, y = V2, colour = factor(subclusters[[i]]))) +
+    geom_point(size = 0.5) + 
+    theme_classic() + 
+    labs(title=paste(sample_name, "- subcluster", sep=" ")) + 
+    theme(legend.position = "none")
+  
+  plot_grid(umi_count, gene_count, hybrid_score_plot, hybrid2_score_plot, cluster_plot, subcluster_plot, ncol = 3, byrow=F)
+})
+```
+
+Let's determine the subclusters outlier.
+
+```{r}
+sample_clusters_summary = lapply(1:length(sce_object), function(i) {
+  return(data.frame(sample = i, cluster = unique(subclusters[[i]])))
+})
+sample_clusters_summary = do.call(rbind, sample_clusters_summary)
+
+sample_clusters_summary$n_cells = sapply(1:nrow(sample_clusters_summary), function(row){
+     sum(subclusters[[sample_clusters_summary$sample[row]]] == sample_clusters_summary$cluster[row])
+})
+
+sample_clusters_summary$frac_cells = sapply(1:nrow(sample_clusters_summary), function(row){
+     sample_clusters_summary$n_cells[row]/sum(sample_clusters_summary$n_cells[sample_clusters_summary$sample == sample_clusters_summary$sample[row]])
+})
+
+sample_clusters_summary$n_hybrid2_doublet_cells = sapply(1:nrow(sample_clusters_summary), function(row){
+    sample = sample_clusters_summary$sample[row]
+    subcluster = sample_clusters_summary$cluster[row]
+    sum(hybrid2_doublet_call[[sample]][colData(sce_object[[sample]])[subclusters[[sample]] == subcluster,]$Barcode, ]$hybrid2_doublet_call == TRUE, na.rm=TRUE)
+})
+
+sample_clusters_summary$frac_hybrid2_doublet_cells = sapply(1:nrow(sample_clusters_summary), function(row){
+     sample_clusters_summary$n_hybrid2_doublet_cells[row]/sample_clusters_summary$n_cells[row]
+})
+
+sample_clusters_summary$n_vireo_doublet_cells = sapply(1:nrow(sample_clusters_summary), function(row){
+    sample = sample_clusters_summary$sample[row]
+    subcluster = sample_clusters_summary$cluster[row]
+    sum(colData(sce_object[[sample]])$vireo_assignment[subclusters[[sample]] == subcluster] == "doublet")
+})
+
+sample_clusters_summary$frac_vireo_doublet_cells = sapply(1:nrow(sample_clusters_summary), function(row){
+     sample_clusters_summary$n_vireo_doublet_cells[row]/sample_clusters_summary$n_cells[row]
+})
+
+sample_clusters_summary$n_multiseq_doublet_cells = sapply(1:nrow(sample_clusters_summary), function(row){
+    sample = sample_clusters_summary$sample[row]
+    subcluster = sample_clusters_summary$cluster[row]
+    sum(colData(sce_object[[sample]])$multiseq_assignment[subclusters[[sample]] == subcluster] == "Doublet")
+})
+
+sample_clusters_summary$frac_multiseq_doublet_cells = sapply(1:nrow(sample_clusters_summary), function(row){
+     sample_clusters_summary$n_multiseq_doublet_cells[row]/sample_clusters_summary$n_cells[row]
+})
+
+sample_clusters_summary$hybrid2_doublet_outlier = FALSE #scater::isOutlier(sample_clusters_summary$frac_hybrid2_doublet_cells, nmad=3, type="higher", log=FALSE)
+sample_clusters_summary$vireo_doublet_outlier = sample_clusters_summary$frac_vireo_doublet_cells > 0.5 #scater::isOutlier(sample_clusters_summary$frac_vireo_doublet_cells, nmad=6, type="higher", log=FALSE)
+sample_clusters_summary$multiseq_doublet_outlier = sample_clusters_summary$frac_multiseq_doublet_cells > 0.5 #scater::isOutlier(sample_clusters_summary$frac_multiseq_doublet_cells, nmad=6, type="higher", log=FALSE)
+
+noquote("hybrid2 doublet fraction outlier")
+table(sample_clusters_summary$hybrid2_doublet_outlier)
+noquote("Vireo doublet fraction outlier")
+table(sample_clusters_summary$vireo_doublet_outlier)
+noquote("MULTIseq doublet fraction outlier")
+table(sample_clusters_summary$multiseq_doublet_outlier)
+```
+
+Let's look at the agreement between the doublet score-based outlier and the vireo based outlier
+
+```{r}
+table(sample_clusters_summary$hybrid2_doublet_outlier, sample_clusters_summary$vireo_doublet_outlier, dnn=c("hybrid2 doublet fraction", "Vireo doublet fraction outlier"))
+```
+
+Let's also look at the agreement between the doublet score-based outlier and the multiseq based outlier
+
+```{r}
+table(sample_clusters_summary$hybrid2_doublet_outlier, sample_clusters_summary$multiseq_doublet_outlier, dnn=c("hybrid2 doublet fraction", "Multiseq doublet fraction outlier"))
+```
+
+Let's finally look at the agreement between the vireo based outlier and the multiseq based outlier
+
+```{r}
+table(sample_clusters_summary$vireo_doublet_outlier, sample_clusters_summary$multiseq_doublet_outlier, dnn=c("Vireo doublet fraction outlier", "Multiseq doublet fraction outlier"))
+```
+
+We seem to only identify doublet subclusters based on hybrid2 doublet fraction.
+
+```{r, fig.height=3}
+ggplot(data.frame(cluster = stringi::stri_join(sample_clusters_summary$sample, sample_clusters_summary$cluster), frac_hybrid2_doublet_cells=sample_clusters_summary$frac_hybrid2_doublet_cells, doublet=sample_clusters_summary$hybrid2_doublet_outlier),
+       aes(x=cluster, y=frac_hybrid2_doublet_cells, fill=doublet)) +
+  geom_bar(stat="identity") +
+  labs(x = "Sample", y = "Fraction of hybrid2 doublet cell") +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+
+ggplot(data.frame(cluster = stringi::stri_join(sample_clusters_summary$sample, sample_clusters_summary$cluster), frac_vireo_doublet_cells=sample_clusters_summary$frac_vireo_doublet_cells, doublet=sample_clusters_summary$vireo_doublet_outlier),
+       aes(x=cluster, y=frac_vireo_doublet_cells, fill=doublet)) +
+  geom_bar(stat="identity") +
+  labs(x = "Sample", y = "Fraction of vireo doublet cell") +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+
+ggplot(data.frame(cluster = stringi::stri_join(sample_clusters_summary$sample, sample_clusters_summary$cluster), frac_multiseq_doublet_cells=sample_clusters_summary$frac_multiseq_doublet_cells, doublet=sample_clusters_summary$multiseq_doublet_outlier),
+       aes(x=cluster, y=frac_multiseq_doublet_cells, fill=doublet)) +
+  geom_bar(stat="identity") +
+  labs(x = "Sample", y = "Fraction of multiseq doublet cell") +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+```
+
+```{r, fig.height=3}
+ggplot(data.frame(cluster = stringi::stri_join(sample_clusters_summary$sample, sample_clusters_summary$cluster), frac_hybrid2_doublet_cells=sample_clusters_summary$frac_hybrid2_doublet_cells, doublet=sample_clusters_summary$hybrid2_doublet_outlier),
+       aes(x=cluster, y=frac_hybrid2_doublet_cells, colour=doublet)) +
+  geom_jitter() +
+  labs(x = "Sample", y = "Fraction of hybrid2 doublet cell") +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+
+ggplot(data.frame(cluster = stringi::stri_join(sample_clusters_summary$sample, sample_clusters_summary$cluster), frac_vireo_doublet_cells=sample_clusters_summary$frac_vireo_doublet_cells, doublet=sample_clusters_summary$vireo_doublet_outlier),
+       aes(x=1, y=frac_vireo_doublet_cells, colour=doublet)) +
+  geom_jitter() +
+  labs(x = "Sample", y = "Fraction of vireo doublet cell") +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+
+ggplot(data.frame(cluster = stringi::stri_join(sample_clusters_summary$sample, sample_clusters_summary$cluster), frac_multiseq_doublet_cells=sample_clusters_summary$frac_multiseq_doublet_cells, doublet=sample_clusters_summary$multiseq_doublet_outlier),
+       aes(x=cluster, y=frac_multiseq_doublet_cells, colour=doublet)) +
+  geom_jitter() +
+  labs(x = "Sample", y = "Fraction of multiseq doublet cell") +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+```
+
+Now to finalise the per sample doublet call. We will determine final doublet status based on if it's called as doublet by either median outlier or vireo/multiseq fraction. We will also ignore very small clusters too.
+
+```{r}
+sample_clusters_summary$is_doublet = (sample_clusters_summary$hybrid2_doublet_outlier | sample_clusters_summary$vireo_doublet_outlier | sample_clusters_summary$multiseq_doublet_outlier) & sample_clusters_summary$frac_cells <= 0.05
+noquote("Final outlier determination")
+table(sample_clusters_summary$is_doublet)
+```
+
+### Visualising per sample doublet called clusters
+
+```{r, fig.width=4}
+subcluster_plots = lapply(1:length(sce_object), function(i){
+  coord = umap_coord[[i]]
+  sample_name = gsub("/.*", "", sce_object[[i]]$Sample[1])
+  
+  ggplot(as.data.frame(coord), aes(x = V1, y = V2, colour = factor(subclusters[[i]]))) +
+    geom_point(size = 0.5) + 
+    theme_classic() + 
+    theme(legend.position = "none") +
+    labs(title=paste(sample_name, "- subclusters", sep=" "))
+})
+
+subcluster_doublet_plots = lapply(1:length(sce_object), function(i){
+  coord = umap_coord[[i]]
+  sample_name = gsub("/.*", "", sce_object[[i]]$Sample[1])
+  doublet_clusters = as.character(sample_clusters_summary[sample_clusters_summary$is_doublet & sample_clusters_summary$sample == i, "cluster"])
+  entry_cluster = as.data.frame(coord)[subclusters[[i]] %in% doublet_clusters, ]
+  
+  ggplot(as.data.frame(coord), aes(x = V1, y = V2)) +
+    geom_point(color="grey80", size = 0.5) + 
+    geom_point(data=entry_cluster, color="darkred", size=0.7) +
+    theme_classic() + 
+    theme(legend.position = "none") +
+    labs(title=paste(sample_name, "- doublets cluster", sep=" "))
+})
+
+plot_grid(plotlist = c(subcluster_plots, subcluster_doublet_plots), ncol=2)
+```
+
+```{r}
+names(sce_object) = unique(merged_sce_object$Sample)
+cell_summary = stack(lapply(sce_object, function(x) x$total))
+cell_summary$is_cluster_doublet = Reduce(c, lapply(1:length(subclusters), function(i) {
+    ifelse(subclusters[[i]] %in% as.character(sample_clusters_summary[sample_clusters_summary$is_doublet & sample_clusters_summary$sample == i, "cluster"]), "Doublet", "Singlet")
+  })
+)
+cell_summary$is_hybrid2_doublet = Reduce(c, lapply(1:length(hybrid2_doublet_call), function(i) {
+    ifelse(hybrid2_doublet_call[[i]]$hybrid2_doublet_call == TRUE, "Doublet", "Singlet")
+  })
+)
+cell_summary$is_hybrid2_doublet = ifelse(is.na(cell_summary$is_hybrid2_doublet), "Doublet", cell_summary$is_hybrid2_doublet) # For cells called as vireo doublet.
+cell_summary$is_vireo_doublet = Reduce(c, lapply(1:length(sce_object), function(i) {
+    ifelse(sce_object[[i]]$vireo_assignment == "doublet", "Doublet", "Singlet")
+  })
+)
+cell_summary$is_multiseq_doublet = Reduce(c, lapply(1:length(sce_object), function(i) {
+    ifelse(sce_object[[i]]$multiseq_assignment == "Doublet", "Doublet", "Singlet")
+  })
+)
+cell_summary$is_doublet = ifelse(cell_summary$is_cluster_doublet == "Doublet" | cell_summary$is_hybrid2_doublet == "Doublet" | cell_summary$is_vireo_doublet == "Doublet" | cell_summary$is_multiseq_doublet == "Doublet", "Doublet", "Singlet")
+
+ggplot(cell_summary,
+      aes(x=factor(ind, levels=unique(ind)), y=values, fill=is_doublet)) + 
+      geom_boxplot() + 
+      theme_classic() + 
+      scale_y_log10() + 
+      labs(x = "Sample", y = "Number of UMIs", title = "UMI distribution")
+```
+
+The doublet UMI distribution looks reasonable. Let's see how many cells we call as singlet/doublet at this point.
+
+```{r}
+lapply(names(sce_object), function(i){
+  table(cell_summary[cell_summary$ind == i,]$is_doublet)
+})
+```
+
+## Cross sample doublet detection
+
+Now that we have identified doublets per sample, we will also want to do cross sample doublet detection to find shared cluster with high proportion of per-smaple doublet called cells (guilt-by-association cluster).
+
+### Batch correction for merging sample
+
+We will first do normalisation across the entire count matrix 
+
+```{r}
+set.seed(1000)
+dec_combined = modelGeneVar(merged_sce_object, subset.row=non_mito_ribo_genes, block=merged_sce_object$Sample)
+hvg_combined = getTopHVGs(dec_combined, prop=0.5)
+length(hvg_combined)
+```
+
+```{r}
+set.seed(1000)
+sce_object_mnn = correctExperiments(merged_sce_object, 
+                                    batch = merged_sce_object$Sample,
+                                    subset.row = hvg_combined,
+                                    PARAM=FastMnnParam(
+                                      merge.order=as.list(intersect(list("Sample_SIGAE1", "Sample_SIGAF1"), merged_sce_object$Sample))
+                                    ))
+```
+
+Let's run UMAP for visualisation.
+
+```{r}
+set.seed(1000)
+sce_object_mnn = runUMAP(sce_object_mnn, dimred="corrected", spread = 1, min_dist = 0.4)
+```
+
+We'll want to do the clustering now.
+
+```{r}
+set.seed(1000)
+merged_graph = buildSNNGraph(sce_object_mnn, use.dimred="corrected")
+merged_clusters = cluster_louvain(merged_graph)$membership
+table(merged_clusters)
+```
+
+```{r}
+table(cluster=merged_clusters, sample=sce_object_mnn$Sample)
+```
+
+Since louvain typically give bigger cluster, we will run further subclustering again, like before.
+
+```{r}
+set.seed(1000)
+merged_subclusters = quickSubCluster(merged_sce_object, groups = merged_clusters, 
+                                       prepFUN = function(x) {
+                                         dec = modelGeneVar(x, subset.row=non_mito_ribo_genes, block=x$Sample)
+                                         input = correctExperiments(x, 
+                                                                    batch = x$Sample,
+                                                                    subset.row = getTopHVGs(dec, prop = 0.5),
+                                                                    PARAM=FastMnnParam(
+                                                                      merge.order=as.list(intersect(list("Sample_SIGAE1", "Sample_SIGAF1"), x$Sample))
+                                                                    ))
+                                       }, 
+                                       clusterFUN = function(x) {
+                                         graph = buildSNNGraph(x, use.dimred="corrected")
+                                         cluster_louvain(graph)$membership
+                                       })
+merged_subclust_membership = lapply(merged_subclusters, function(x){
+    sc = colData(x)$subcluster
+    names(sc) = colData(x)$Barcode
+    sc
+})
+merged_subclust_membership = Reduce(c, merged_subclust_membership)
+merged_subclust_membership = merged_subclust_membership[colData(sce_object_mnn)$Barcode]
+table(merged_subclust_membership)
+```
+
+### Cross-sample guilty doublet detection
+
+Now that we have the subclusters, let's calculate the proportion of per-sample called doublets within each cluster
+
+```{r}
+merged_clusters_summary = data.frame(cluster=unique(merged_subclust_membership))
+
+merged_clusters_summary$n_cells = sapply(1:nrow(merged_clusters_summary), function(row){
+    sum(merged_subclust_membership == merged_clusters_summary$cluster[[row]])
+})
+
+merged_clusters_summary$n_doublet_cells = sapply(1:nrow(merged_clusters_summary), function(row){
+    sum(cell_summary[merged_subclust_membership == merged_clusters_summary$cluster[[row]],]$is_doublet == "Doublet")
+})
+
+merged_clusters_summary$frac_doublet_cells = sapply(1:nrow(merged_clusters_summary), function(row){
+    merged_clusters_summary$n_doublet_cells[row]/merged_clusters_summary$n_cells[row]
+})
+
+merged_clusters_summary$guilt_by_association_cluster = scater::isOutlier(merged_clusters_summary$frac_doublet_cells, nmad=3, type="higher", log=FALSE) 
+
+noquote("Guilt-by-association cluster")
+table(merged_clusters_summary$guilt_by_association_cluster)
+```
+
+Let's have a quick look at the QC plot
+
+```{r, fig.height=3}
+ggplot(merged_clusters_summary, aes(x=cluster, y=frac_doublet_cells, fill=guilt_by_association_cluster)) +
+  geom_bar(stat="identity") +
+  labs(x = "Sample", y = "Fraction of per-sample doublet cell", fill="Doublet cluster") +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+```
+
+```{r}
+cell_summary$xsample_guilty_doublet = ifelse(merged_subclust_membership %in% as.character(merged_clusters_summary[merged_clusters_summary$guilt_by_association_cluster, "cluster"]), "Doublet", "Singlet")
+ggplot(cell_summary, aes(y=values, fill=xsample_guilty_doublet)) + 
+      geom_boxplot() + 
+      theme_classic() + 
+      scale_y_log10() + 
+      labs(x = "Sample", y = "Number of UMIs", title = "UMI distribution")
+```
+
+All these looks reasonable. Let's visualise on the UMAP plot where these doublet clusters are
+
+```{r}
+merged_cluster_plot = ggplot(cbind(as.data.frame(reducedDim(sce_object_mnn, "UMAP")), data.frame(cluster=merged_clusters)), aes(x = V1, y = V2, colour = factor(cluster))) +
+  geom_point(size = 0.5) + 
+  theme_classic() + 
+  theme(legend.position = "none") +
+  labs(title="Merged clusters")
+
+merged_subcluster_plot =  ggplot(cbind(as.data.frame(reducedDim(sce_object_mnn, "UMAP")), data.frame(subcluster=merged_subclust_membership)), aes(x = V1, y = V2, colour = factor(subcluster))) +
+  geom_point(size = 0.5) + 
+  theme_classic() + 
+  theme(legend.position = "none") +
+  labs(title="Merged subclusters")
+
+merged_doublet_plot = ggplot(as.data.frame(reducedDim(sce_object_mnn, "UMAP")), aes(x = V1, y = V2)) +
+  geom_point(color="grey80", size = 0.5) + 
+  geom_point(data=as.data.frame(reducedDim(sce_object_mnn, "UMAP"))[cell_summary$xsample_guilty_doublet == "Doublet", c("V1", "V2")], color="darkred", size=0.7) +
+  theme_classic() + 
+  theme(legend.position = "none") +
+  labs(title="Doublets clusters")
+
+plot_grid(merged_cluster_plot, merged_subcluster_plot, merged_doublet_plot)
+```
+
+```{r}
+table(cell_summary$is_doublet, cell_summary$xsample_guilty_doublet, dnn=c("doublet per sample", "doublet across sample"))
+```
+
+## Final doublet call
+
+For the final doublet call, we will use both the call from per sample doublet and cross sample doublet. We will also remove any vireo detected doublet which did not fall into the per sample doublet or cross sample doublet.
+
+```{r}
+doublet_calling_summary = cell_summary[-c(1)]
+
+doublet_calling_summary$final_doublet_call = ifelse(doublet_calling_summary$is_doublet == "Doublet" | doublet_calling_summary$xsample_guilty_doublet == "Doublet", "Doublet", "Singlet")
+doublet_calling_summary
+```
+
+Let's look at the summary of the doublet call.
+
+```{r}
+table(sample=sce_object_mnn$Sample, status=doublet_calling_summary$final_doublet_call)
+```
+
+```{r, fig.height=1.5, fig.width=3}
+ggplot(data=melt(table(sample=sce_object_mnn$Sample, status=doublet_calling_summary$final_doublet_call)), aes(x=sample, y=value, fill=status)) +
+  geom_bar(stat="identity") +
+  scale_x_discrete() +
+  labs(x=NULL)+
+  ggtitle("Doublet assigment") +
+  geom_text(aes(label=value), position=position_stack(vjust=0.5), colour="white") +
+  labs(fill="")
+```
+
+```{r, fig.width=4}
+ggplot(as.data.frame(reducedDim(sce_object_mnn, "UMAP")), aes(x = V1, y = V2)) +
+  geom_point(color="grey80", size = 0.5) +
+  geom_point(data=as.data.frame(reducedDim(sce_object_mnn, "UMAP"))[doublet_calling_summary$final_doublet_call == "Doublet", c("V1", "V2")], color="darkred", size=0.7) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  labs(title="Final doublets call")
+```
+
+Time to add the doublet call summary to the single cell object.
+
+```{r}
+colData(merged_sce_object) = cbind(colData(merged_sce_object), doublet_calling_summary[, c(2:length(doublet_calling_summary))])
+merged_sce_object
+```
+
+```{r}
+saveRDS(doublet_calling_summary, "doublet_calling_summary.rds")
+saveRDS(merged_sce_object, "dc_cell.rds")
+```

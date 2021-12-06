@@ -1,0 +1,345 @@
+---
+title: "hiPSCi cell line evaluation (all differentiations) - Differentiations figures"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(igraph)
+library(dplyr)
+#library(schex)
+library(wesanderson)
+library(ComplexHeatmap)
+library(circlize)
+library(pals)
+library(ggrastr)
+library(ggedit)
+theme_set(theme_cowplot())
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+```{r}
+color_palette = list(
+  "hypothalamus"=c("#54c2af", "#c24dac", "#52bc59", "#9c5bce", "#98b946", "#626cd4", "#cba94a", "#6471b6", "#5b8436", "#d34680", "#3f8f64", "#ce473e", "#5ea5db", "#cf7941", "#c584c4", "#887031", "#ba6271"),
+  "cortical"=c("#96e97c", "#074d65", "#23dbe1", "#1b4dab", "#a6b6f9", "#762aac", "#997cfb", "#285d28", "#d3d6c1", "#6e390d", "#65a10e", "#d60724", "#e3d769"),
+  "hNGN2"=c("#c3ae81", "#7e8cdc", "#a3d37d", "#cd8fd5", "#57ad6a", "#de7b70", "#78d6af", "#d78ea8", "#9aa850", "#85aad6", "#cf9554","#63c8d7", "#62a38d"),
+  "hNIL"=c("#75859d", "#5c0d47", "#539322", "#4a1999", "#4081ec", "#1b511d", "#f90da0", "#173d61", "#c7628e", "#2f937a", "#6b2402", "#9c6ae4", "#473a0a")
+)
+
+cell_Line_palette = c("#999999", "#5566AA", "#558866", "#AADDCC", "#DDCC66","#99bb55", "#BB0011")
+```
+
+# Cell line contribution
+
+We want to evaluate the performance of each cell line in terms of differentiation efficiency to target cell type across all differentiations.
+
+For each differentiations, we have annotated each clusters with their cell type and class of cell type (target neuron, neuron or progenitor/other).
+
+## Data loading
+
+Let's first load the annotation
+
+```{r}
+cluster_annotations = read.csv("cluster_annotation_16052021.csv", stringsAsFactors = F)
+cluster_annotations$ClusterID = as.integer(gsub("[a-zA-Z]+", "", cluster_annotations$Cluster))
+```
+
+
+Let's load all the differentiations and assign the cell identity to each differentiations.
+
+```{r}
+differentiations = c("hypothalamus", "cortical", "hNGN2", "hNIL")
+differentiations_sce_objects = lapply(differentiations, function(d){
+  merged_sce_object = readRDS(paste0(d, "/dc_cell.rds"))
+  sce_object_mnn = readRDS(paste0(d, "/clustered_cell.rds"))
+  
+  # Subset the merged_sce_object to include only cells found in sce_object_mnn
+  merged_sce_object = merged_sce_object[, paste0(merged_sce_object$Sample, ".", merged_sce_object$Barcode) %in% paste0(sce_object_mnn$Sample, ".", sce_object_mnn$Barcode)]
+  
+  # Rearrange the sce_object_mnn to match the ordering of merged_sce_object
+  colnames(sce_object_mnn) = paste0(sce_object_mnn$Sample, ".", sce_object_mnn$Barcode)
+  sce_object_mnn = sce_object_mnn[, paste0(merged_sce_object$Sample, ".", merged_sce_object$Barcode)]
+  
+  merged_sce_object$cluster = sce_object_mnn$cluster
+  
+  # Add in the cluster annotation and cell type classification
+  cluster_differentiation_annotation = cluster_annotations[cluster_annotations$Differentiation == d, ]
+  cluster_differentiation_annotation = cluster_differentiation_annotation[order(cluster_differentiation_annotation$ClusterID), ]
+  cluster_differentiation_annotation$Annotation = make.unique(cluster_differentiation_annotation$Annotation, sep = " ")
+  
+  merged_sce_object$annotation = sapply(merged_sce_object$cluster, function(i) cluster_differentiation_annotation$Annotation[i])
+  merged_sce_object$annotation_category = sapply(merged_sce_object$cluster, function(i) cluster_differentiation_annotation$Annotation.category[i])
+  
+  # Transfer the reducedDim representation and trim it to the first 2 dim only
+  for (reduced_dim in names(reducedDims(sce_object_mnn))) {
+    reducedDim(merged_sce_object, reduced_dim) = reducedDim(sce_object_mnn, reduced_dim)[,c(1:2)]
+  }
+  
+  # Fix name for KOLF2 line
+  merged_sce_object$vireo_assignment = gsub("KOLF2", "KOLF2.1J", merged_sce_object$vireo_assignment)
+  merged_sce_object$vireo_assignment = gsub("NN0003932", "NN_combined", merged_sce_object$vireo_assignment)
+  
+  merged_sce_object
+})
+names(differentiations_sce_objects) = differentiations
+differentiations_sce_objects
+```
+
+## Contribution by cell line
+
+Let's visualise the UMAP with annotation and annotation category!
+
+```{r, fig.width=10, fig.height=5}
+annotation_category_types = c("target neuron", "neuron", "neuroblast", "progenitor/other")
+annotation_category_colour_mapping = c("#167791", "#2DA6C8", "#7CCADF", "#BDD4DB")
+names(annotation_category_colour_mapping) = annotation_category_types
+
+lapply(differentiations, function(d){
+  sce_object = differentiations_sce_objects[[d]]
+  sce_object$annotation_category = factor(sce_object$annotation_category, levels=annotation_category_types)
+  plot_grid(plotUMAP(sce_object, colour_by="cluster", text_by="annotation") + scale_colour_manual(values = color_palette[[d]]) + ggtitle(paste0(d, " - cell identity")), 
+            plotUMAP(sce_object, colour_by="annotation_category", text_by="annotation") + ggtitle(paste0(d, " - cell identity category")) + ggtitle(paste0(d, " - cell identity category")) + scale_colour_manual(values=annotation_category_colour_mapping[sort(unique(sce_object$annotation_category))]) ) 
+})
+```
+
+Let's visualise all differentiation in one figure to give a quick overview across all differentiation
+
+```{r, fig.width=15, fig.height=6}
+plot_grid(plotlist  = c(
+  lapply(differentiations, function(d){
+    sce_object = differentiations_sce_objects[[d]]
+    sce_object$annotation_category = factor(sce_object$annotation_category, levels=annotation_category_types) 
+    plotUMAP(sce_object, colour_by="annotation_category", text_by="cluster") + ggtitle(paste0(d, " - cell identity category")) + scale_colour_manual(values=annotation_category_colour_mapping[sort(unique(sce_object$annotation_category))])
+  }),
+  lapply(differentiations, function(d){
+    sce_object = differentiations_sce_objects[[d]]
+    plotUMAP(sce_object, colour_by="vireo_assignment", text_by="cluster") + ggtitle(paste0(d, " - cell line")) + scale_colour_manual(values=cell_Line_palette)
+  })
+), nrow = 2)
+```
+
+We can already see from a few differentiations (hypothalamus, cortical and hNGN2) that the LNGP1 lines behaves somewhat differently compared to other cell line. This is more pronounced in hypothalamus and cortical differentiation where this line create almost it's own cluster.
+
+The figures are not actually very clear however, so let's visualise this as a percentage
+
+```{r, fig.width=10, fig.height=3}
+cell_line_contributions = Reduce(rbind, lapply(differentiations, function(d){
+  sce_object = differentiations_sce_objects[[d]]
+  cell_line_count = data.frame(differentiation=d, table(sce_object$vireo_assignment, sce_object$annotation_category))
+  colnames(cell_line_count) = c("differentiation", "cell_line", "cell_type", "count")
+  cell_line_count$percentage_by_line = cell_line_count$count / table(sce_object$vireo_assignment)[cell_line_count$cell_line]
+  cell_line_count
+}))
+
+cell_line_contributions$cell_line  = gsub("-.*", "", as.character(cell_line_contributions$cell_line))
+cell_line_contributions$cell_line = factor(cell_line_contributions$cell_line, levels = unique(cell_line_contributions$cell_line))
+cell_line_contributions$cell_type = factor(cell_line_contributions$cell_type, levels=annotation_category_types)
+
+ggplot(data=cell_line_contributions, aes(x=cell_line, y=count, fill=cell_type, label=count)) +
+  geom_bar(position="fill", stat="identity") +
+  geom_text(size = 5, position = position_fill(vjust = 0.5)) +
+  theme_classic() +
+  scale_fill_manual(values=annotation_category_colour_mapping[sort(unique(cell_line_contributions$cell_type))]) +
+  theme(axis.text.y = element_text(size = 12), axis.text.x = element_text(angle = 45, hjust = 1, size = 12.5), legend.position = "right", legend.key.size = unit(0.5,"cm"), legend.text = element_text(size=15)) + 
+  labs(x=NULL, y="% contribution") + 
+  facet_wrap(~differentiation, ncol=5)
+```
+
+Let's visualise this with the differentiation being the x axis and cell line being the facets
+
+```{r, fig.width=10, fig.height=3}
+ggplot(data=cell_line_contributions, aes(x=differentiation, y=count, fill=cell_type, label=count)) +
+  geom_bar(position="fill", stat="identity") +
+  geom_text(size = 5, position = position_fill(vjust = 0.5)) +
+  theme_classic() +
+  scale_fill_manual(values=annotation_category_colour_mapping[sort(unique(cell_line_contributions$cell_type))]) +
+  theme(axis.text.y = element_text(size = 12), axis.text.x = element_text(angle = 45, hjust = 1, size = 12.5), legend.position = "right", legend.key.size = unit(0.5,"cm"), legend.text = element_text(size=15)) + 
+  labs(x=NULL, y="% contribution") + 
+  facet_wrap(~cell_line, ncol=7)
+```
+
+
+## Differentiation efficiency figure
+
+Let's compose the plots into a single figure.
+
+```{r, fig.width=8, fig.height=5}
+plot_grid(plotlist  = c(
+  lapply(differentiations, function(d){
+    sce_object = differentiations_sce_objects[[d]]
+    sce_object$vireo_assignment = gsub("-.*", "", as.character(sce_object$vireo_assignment))
+    p = plotUMAP(sce_object, colour_by="vireo_assignment", point_size=0.75) + theme(legend.position = "none", axis.text.x=element_blank(), axis.text.y=element_blank(), axis.ticks.x=element_blank(), axis.ticks.y=element_blank())  + scale_colour_manual(values=cell_Line_palette) + rasterise(geom_point(mapping = aes(col=colour_by), alpha=0.6, size=0.75), dpi=600)
+    p %>% remove_geom('point', 1)
+  }),
+  list(get_legend(plotUMAP(differentiations_sce_objects[["hypothalamus"]], colour_by=I(gsub("-.*", "", as.character(differentiations_sce_objects[["hypothalamus"]]$vireo_assignment)))) + guides(colour = guide_legend(override.aes = list(size=3)))  + scale_colour_manual(name="cell line", values=cell_Line_palette))),
+  lapply(differentiations, function(d){
+    sce_object = differentiations_sce_objects[[d]]
+    sce_object$annotation_category = factor(sce_object$annotation_category, levels=annotation_category_types) 
+    p = plotUMAP(sce_object, colour_by="annotation_category", point_size=0.75) + theme(legend.position = "none", axis.text.x=element_blank(), axis.text.y=element_blank(), axis.ticks.x=element_blank(), axis.ticks.y=element_blank()) + scale_colour_manual(values=annotation_category_colour_mapping[sort(unique(sce_object$annotation_category))]) + rasterise(geom_point(mapping = aes(col=colour_by), alpha=0.6, size=0.75), dpi=600) 
+    p %>% remove_geom('point', 1)
+  }),
+  list(get_legend(plotUMAP(differentiations_sce_objects[["hypothalamus"]], colour_by="annotation_category", point_size=0.75) + guides(colour = guide_legend(override.aes = list(size=3))) + scale_colour_manual(name="cell type", values=annotation_category_colour_mapping))),
+  lapply(differentiations, function(d){
+    ggplot(data=cell_line_contributions[cell_line_contributions$differentiation == d,], aes(x=cell_line, y=count, fill=cell_type, label=count)) +
+    geom_bar(position="fill", stat="identity") +
+    theme_classic() +
+    scale_fill_manual(values=annotation_category_colour_mapping[sort(unique(cell_line_contributions$cell_type))]) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none") + 
+    labs(x=NULL, y="% contribution") 
+  })
+), ncol=5, nrow = 3, rel_heights = c(1,1,0.75), rel_widths = c(1,1,1,1,0.5))
+ggsave("figure_5.pdf", height = 10, width = 17.5, units = "in", colormodel = "cmyk")
+```
+
+
+## Comparison of differentiation efficiency per replicate
+
+We now want to see how consistent the differentiation efficiency per replicate is. Since each differentiation has a slightly different replicate structure, we will need to do each differentiation separately.
+
+### Cortical
+
+For cortical differentiation, we have between 2 user replicate and 2 technical replicate per user. 
+
+```{r}
+cortical_cell_line_replicate_contributions = Reduce(rbind, lapply(unique(differentiations_sce_objects$cortical$multiseq_assignment), function(rep){
+  sce_object = differentiations_sce_objects$cortical[, differentiations_sce_objects$cortical$multiseq_assignment == rep]
+  cell_line_count = data.frame(replicate=rep, table(sce_object$vireo_assignment, sce_object$annotation_category))
+  colnames(cell_line_count) = c("replicate", "cell_line", "cell_type", "count")
+  cell_line_count$percentage_by_line = cell_line_count$count / table(sce_object$vireo_assignment)[cell_line_count$cell_line]
+  cell_line_count
+}))
+
+cortical_cell_line_replicate_contributions$replicate = factor(cortical_cell_line_replicate_contributions$replicate)
+levels(cortical_cell_line_replicate_contributions$replicate) = c("User1_Rep1", "User1_Rep2", "User2_Rep1", "User2_Rep2")
+cortical_cell_line_replicate_contributions$cell_line  = gsub("-.*", "", as.character(cortical_cell_line_replicate_contributions$cell_line))
+cortical_cell_line_replicate_contributions$cell_line = factor(cortical_cell_line_replicate_contributions$cell_line, levels = unique(cortical_cell_line_replicate_contributions$cell_line))
+cortical_cell_line_replicate_contributions$cell_type = factor(cortical_cell_line_replicate_contributions$cell_type, levels=annotation_category_types)
+```
+
+```{r, fig.width=7, fig.height=3}
+cortical_replicate_breakdown_plot = ggplot(data=cortical_cell_line_replicate_contributions, aes(x=replicate, y=count, fill=cell_type, label=count)) +
+  geom_bar(position="fill", stat="identity") +
+  geom_text(size = 5, position = position_fill(vjust = 0.5)) +
+  theme_classic() +
+  scale_fill_manual(values=annotation_category_colour_mapping[sort(unique(cortical_cell_line_replicate_contributions$cell_type))]) +
+  theme(axis.text.y = element_text(size = 12), axis.text.x = element_text(angle = 45, hjust = 1, size = 12.5), legend.position = "right", legend.key.size = unit(0.5,"cm"), legend.text = element_text(size=15)) + 
+  labs(x=NULL, y="% contribution", title = "cortical") + 
+  facet_wrap(~cell_line, ncol=7)
+```
+
+
+### Hypothalamus
+
+For hypothalamus differentiations, we have 2 technical replicates only. 
+
+```{r}
+hypothalamus_cell_line_replicate_contributions = Reduce(rbind, lapply(unique(differentiations_sce_objects$hypothalamus$Sample), function(rep){
+  sce_object = differentiations_sce_objects$hypothalamus[, differentiations_sce_objects$hypothalamus$Sample == rep]
+  cell_line_count = data.frame(replicate=rep, table(sce_object$vireo_assignment, sce_object$annotation_category))
+  colnames(cell_line_count) = c("replicate", "cell_line", "cell_type", "count")
+  cell_line_count$percentage_by_line = cell_line_count$count / table(sce_object$vireo_assignment)[cell_line_count$cell_line]
+  cell_line_count
+}))
+
+hypothalamus_cell_line_replicate_contributions$replicate = factor(hypothalamus_cell_line_replicate_contributions$replicate)
+levels(hypothalamus_cell_line_replicate_contributions$replicate) = c("Rep1", "Rep2")
+hypothalamus_cell_line_replicate_contributions$cell_line  = gsub("-.*", "", as.character(hypothalamus_cell_line_replicate_contributions$cell_line))
+hypothalamus_cell_line_replicate_contributions$cell_line = factor(hypothalamus_cell_line_replicate_contributions$cell_line, levels = unique(cell_line_contributions$cell_line))
+hypothalamus_cell_line_replicate_contributions$cell_type = factor(hypothalamus_cell_line_replicate_contributions$cell_type, levels=annotation_category_types)
+```
+
+```{r, fig.width=5, fig.height=3}
+hypothalamus_replicate_breakdown_plot = ggplot(data=hypothalamus_cell_line_replicate_contributions, aes(x=replicate, y=count, fill=cell_type, label=count)) +
+  geom_bar(position="fill", stat="identity") +
+  geom_text(size = 5, position = position_fill(vjust = 0.5)) +
+  theme_classic() +
+  scale_fill_manual(values=annotation_category_colour_mapping[sort(unique(hypothalamus_cell_line_replicate_contributions$cell_type))]) +
+  theme(axis.text.y = element_text(size = 12), axis.text.x = element_text(angle = 45, hjust = 1, size = 12.5), legend.position = "right", legend.key.size = unit(0.5,"cm"), legend.text = element_text(size=15)) + 
+  labs(x=NULL, y="% contribution", title = "hypothalamus") + 
+  facet_wrap(~cell_line, ncol=7)
+```
+
+### hNGN2 + hNIL
+
+For hNGN2 and hNIL differentiations, we have 2 technical replicates and 2 differentiation condition (where cells are either grown together or grown separately). Let's look at the correlation of the percentage by line between the two technical replicates and across the differentiation condition.
+
+```{r}
+hNGN2_cell_line_replicate_contributions = Reduce(rbind, lapply(unique(differentiations_sce_objects$hNGN2$Sample), function(rep){
+  sce_object = differentiations_sce_objects$hNGN2[, differentiations_sce_objects$hNGN2$Sample == rep]
+  cell_line_count = data.frame(replicate=rep, table(sce_object$vireo_assignment, sce_object$annotation_category))
+  colnames(cell_line_count) = c("replicate", "cell_line", "cell_type", "count")
+  cell_line_count$percentage_by_line = cell_line_count$count / table(sce_object$vireo_assignment)[cell_line_count$cell_line]
+  cell_line_count
+}))
+
+hNGN2_cell_line_replicate_contributions$replicate = gsub("(Sample_|_hN.*)", "", hNGN2_cell_line_replicate_contributions$replicate)
+hNGN2_cell_line_replicate_contributions$cell_line  = gsub("-.*", "", as.character(hNGN2_cell_line_replicate_contributions$cell_line))
+hNGN2_cell_line_replicate_contributions$cell_line = factor(hNGN2_cell_line_replicate_contributions$cell_line, levels = unique(hNGN2_cell_line_replicate_contributions$cell_line))
+hNGN2_cell_line_replicate_contributions$cell_type = factor(hNGN2_cell_line_replicate_contributions$cell_type, levels=annotation_category_types)
+
+hNIL_cell_line_replicate_contributions = Reduce(rbind, lapply(unique(differentiations_sce_objects$hNIL$Sample), function(rep){
+  sce_object = differentiations_sce_objects$hNIL[, differentiations_sce_objects$hNIL$Sample == rep]
+  cell_line_count = data.frame(replicate=rep, table(sce_object$vireo_assignment, sce_object$annotation_category))
+  colnames(cell_line_count) = c("replicate", "cell_line", "cell_type", "count")
+  cell_line_count$percentage_by_line = cell_line_count$count / table(sce_object$vireo_assignment)[cell_line_count$cell_line]
+  cell_line_count
+}))
+
+hNIL_cell_line_replicate_contributions$replicate = gsub("(Sample_|_hN.*)", "", hNIL_cell_line_replicate_contributions$replicate)
+hNIL_cell_line_replicate_contributions$cell_line  = gsub("-.*", "", as.character(hNIL_cell_line_replicate_contributions$cell_line))
+hNIL_cell_line_replicate_contributions$cell_line = factor(hNIL_cell_line_replicate_contributions$cell_line, levels = unique(hNGN2_cell_line_replicate_contributions$cell_line))
+hNIL_cell_line_replicate_contributions$cell_type = factor(hNIL_cell_line_replicate_contributions$cell_type, levels=annotation_category_types)
+```
+
+```{r, fig.width=7, fig.height=3}
+hNGN2_replicate_breakdown_plot = ggplot(data=hNGN2_cell_line_replicate_contributions, aes(x=replicate, y=count, fill=cell_type, label=count)) +
+  geom_bar(position="fill", stat="identity") +
+  geom_text(size = 5, position = position_fill(vjust = 0.5)) +
+  theme_classic() +
+  scale_fill_manual(values=annotation_category_colour_mapping[sort(unique(hNGN2_cell_line_replicate_contributions$cell_type))]) +
+  theme(axis.text.y = element_text(size = 12), axis.text.x = element_text(angle = 45, hjust = 1, size = 12.5), legend.position = "right", legend.key.size = unit(0.5,"cm"), legend.text = element_text(size=15)) + 
+  labs(x=NULL, y="% contribution", title = "hNGN2") + 
+  facet_wrap(~cell_line, ncol=7)
+
+hNIL_replicate_breakdown_plot = ggplot(data=hNIL_cell_line_replicate_contributions, aes(x=replicate, y=count, fill=cell_type, label=count)) +
+  geom_bar(position="fill", stat="identity") +
+  geom_text(size = 5, position = position_fill(vjust = 0.5)) +
+  theme_classic() +
+  scale_fill_manual(values=annotation_category_colour_mapping[sort(unique(hNIL_cell_line_replicate_contributions$cell_type))]) +
+  theme(axis.text.y = element_text(size = 12), axis.text.x = element_text(angle = 45, hjust = 1, size = 12.5), legend.position = "right", legend.key.size = unit(0.5,"cm"), legend.text = element_text(size=15)) + 
+  labs(x=NULL, y="% contribution", title = "hNIL") + 
+  facet_wrap(~cell_line, ncol=7)
+```
+
+In most cases, we see similar differentiation performance between technical replicate and across condition, with the exception of LNGPI1.
+
+## Different efficiency by replicate
+
+```{r}
+plot_grid(hypothalamus_replicate_breakdown_plot, cortical_replicate_breakdown_plot, hNGN2_replicate_breakdown_plot, hNIL_replicate_breakdown_plot, nrow=1, rel_widths = c(0.65,1,1,1))
+ggsave("sup_figure_6.pdf", height = 5, width = 50, units = "in", colormodel = "cmyk", limitsize = F)
+```
+
+
+
+
+

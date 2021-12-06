@@ -1,0 +1,212 @@
+---
+title: "hiPSCi cell line evaluation (hNGN2) - 08 Defining cluster"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(igraph)
+library(dplyr)
+theme_set(theme_cowplot())
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+```{r}
+color_palette = c("#c4eadd",
+                  "#d098d7",
+                  "#dce496",
+                  "#bab5ff",
+                  "#f9d08b",
+                  "#5bb4ef",
+                  "#e1ad71",
+                  "#16c4e8",
+                  "#ffa3c6",
+                  "#4ec9b1",
+                  "#de9a98",
+                  "#22c0ba",
+                  "#ffbfb2",
+                  "#62be93",
+                  "#ffcfe0",
+                  "#c0ffdb",
+                  "#a5b17a",
+                  "#abebff",
+                  "#e0ffd0",
+                  "#9dc4b8",
+                  "#affff5")
+```
+
+For this experiment, we have 4 samples which have been multiplexed by genotype. We have two different pooling strategy used:
+
+ 1. Pool 1 and 2 conditions: The 8 ipsc lines were differentiated in separate wells (n=2, total of 16 wells) from day 1 to 17. On day 17 the cells were papain-dissociated and pooled the eight lines into one single tube (n=2) to proceed with 10x genomics experiment.
+ 2.  Combined 1 and 2 conditions: The 8 ipsc lines were differentiated in separate wells (n=2, total of 16 wells) from day 1 to 3.  On day 3 the 8 lines were pooled into one well (n=2) and continue differentiation until day 17.  On day 17 the cells were papain-dissociated to proceed with 10x genomics experiment.
+
+- Sample Pool1: hNGN2 pool cell line 1-8 replicate 1
+- Sample Pool2: hNGN2 pool cell line 1-8 replicate 2
+- Sample Combined1: hNGN2 combined cell line 1-8 replicate 1
+- Sample Combined2: hNGN2 combined cell line 1-8 replicate 2
+
+# Defining cluster
+
+```{r}
+sce_object_mnn = readRDS("all_corrections.rds")
+```
+
+We will now define the clusters to be used for further analysis. The clustering approach we will be using is essentially the same as the one we have previously performed for previous analysis. We first construct shared nearest neighbour graph and then identify the community using Louvain algorithm.
+
+```{r, fig.height=3}
+set.seed(1000)
+snn_graph = buildSNNGraph(sce_object_mnn, use.dimred="corrected")
+clusters = cluster_louvain(snn_graph)$membership
+table(clusters)
+```
+
+```{r}
+ggplot(as.data.frame(table(clusters)), aes(x=clusters, y=Freq)) +
+    geom_bar(stat="identity") +
+    labs(x = "Cluster number", y = "Number of cells", title = paste("Louvain cluster"))
+```
+
+```{r, fig.width=10, fig.height=5}
+sce_object_mnn$cluster = as.factor(clusters)
+plot_grid(plotUMAP(sce_object_mnn, colour_by="cluster", text_by="cluster") + scale_fill_manual(values = color_palette) + scale_color_manual(values = color_palette), plotUMAP(sce_object_mnn, colour_by="Sample"))
+```
+
+Let's check the contribution of each sample for the clustering.
+
+```{r, fig.width=10, fig.height=8}
+plotUMAP(sce_object_mnn, colour_by="cluster", other_fields = "Sample") + facet_wrap(~Sample)
+```
+
+```{r}
+table(sample=sce_object_mnn$Sample, cluster=sce_object_mnn$cluster)
+```
+
+Let's visualise this to make it easier to interpret.
+
+```{r, fig.width=6, fig.height=4}
+contributions = as.data.frame.table(table(sample=sce_object_mnn$Sample, cluster=sce_object_mnn$cluster))
+colnames(contributions) = c("Sample", "Cluster", "Count")
+  
+ggplot(data=contributions, mapping = aes(x=Cluster, y=Count, fill=Sample)) +
+geom_bar(stat="identity") + 
+scale_x_discrete() +
+labs(x=NULL)+
+geom_text(aes(label=Count), position=position_stack(vjust=0.5), colour="white") +
+labs(fill="") +
+scale_fill_brewer(palette = "Set2", type = "qual")
+```
+
+```{r}
+saveRDS(sce_object_mnn, "clustered_cell.rds")
+```
+
+
+# Confounding factors
+
+We want to check if the clusters could be generated due to technical differences between the cells.
+
+## Library size
+
+```{r}
+plotColData(sce_object_mnn, x="cluster", y="total", colour_by = "Sample") +
+  labs(x = "Cluster", y = "#UMIs") 
+```
+
+Let's have a quick look at the contribution of different batches to see if the UMI size of some cluster is specific to certain batch.
+
+```{r, fig.width=10}
+plotColData(sce_object_mnn, x="cluster", y="total", colour_by = "Sample", other_fields = "Sample") +
+  labs(x = "Cluster", y = "#UMIs") + 
+  facet_wrap(~Sample)
+```
+
+Let's look based on cell line assignment.
+
+```{r}
+plotColData(sce_object_mnn, x="cluster", y="total", colour_by = "vireo_assignment") +
+  labs(x = "Cluster", y = "#UMIs") + scale_fill_manual(values=pals::tol(length(unique(sce_object_mnn$vireo_assignment))))
+```
+
+```{r, fig.width=10}
+plotColData(sce_object_mnn, x="cluster", y="total", colour_by = "vireo_assignment", other_fields = "vireo_assignment") +
+  labs(x = "Cluster", y = "#UMIs") + 
+  facet_wrap(~vireo_assignment, ncol=4) + scale_fill_manual(values=pals::tol(length(unique(sce_object_mnn$vireo_assignment))))
+```
+
+## Cell line
+
+Let's also see the contribution from the different cell lines.
+
+```{r, fig.width=10, fig.height=5}
+sce_object_mnn$cluster = as.factor(clusters)
+plot_grid(plotUMAP(sce_object_mnn, colour_by="cluster", text_by="cluster") + scale_fill_manual(values = color_palette) + scale_color_manual(values = color_palette), plotUMAP(sce_object_mnn, colour_by="vireo_assignment") + scale_fill_manual(values=pals::tol(length(unique(sce_object_mnn$vireo_assignment)))))
+```
+
+```{r, fig.width=10}
+plotUMAP(sce_object_mnn, colour_by="cluster", other_fields = "vireo_assignment") + scale_fill_manual(values = color_palette) + facet_wrap(~vireo_assignment, ncol=4)
+```
+
+```{r}
+table(sample=sce_object_mnn$vireo_assignment, cluster=sce_object_mnn$cluster)
+```
+
+```{r, fig.width=4, fig.height=4}
+sample_contributions = as.data.frame.table(table(sample=sce_object_mnn$Sample, cell_line=sce_object_mnn$vireo_assignment))
+colnames(sample_contributions) = c("Sample", "Cell line", "Count")
+sample_contributions$Sample = gsub("(Sample_|_hN.*)", "", sample_contributions$Sample)
+  
+ggplot(data=sample_contributions, mapping = aes(x=Sample, y=Count, fill=`Cell line`)) +
+geom_bar(stat="identity") + 
+scale_x_discrete() +
+labs(x=NULL)+
+geom_text(aes(label=Count), position=position_stack(vjust=0.5), colour="white") +
+labs(fill="") +
+scale_fill_manual(values=pals::tol(length(unique(sce_object_mnn$vireo_assignment))))
+```
+
+```{r, fig.width=6, fig.height=4}
+contributions = as.data.frame.table(table(sample=sce_object_mnn$vireo_assignment, cluster=sce_object_mnn$cluster))
+colnames(contributions) = c("Cell line", "Cluster", "Count")
+  
+ggplot(data=contributions, mapping = aes(x=Cluster, y=Count, fill=`Cell line`)) +
+geom_bar(stat="identity") + 
+scale_x_discrete() +
+labs(x=NULL)+
+geom_text(aes(label=Count), position=position_stack(vjust=0.5), colour="white") +
+labs(fill="") +
+scale_fill_manual(values=pals::tol(length(unique(sce_object_mnn$vireo_assignment))))
+```
+
+## Mitochondrial gene fraction
+
+```{r}
+plotColData(sce_object_mnn, x="cluster", y="subsets_Mito_percent", colour_by = "vireo_assignment", other_fields = "vireo_assignment") +
+  labs(x = "Cluster", y = "Mitochrondrial UMI fraction") + scale_fill_manual(values=pals::tol(length(unique(sce_object_mnn$vireo_assignment))))
+```
+
+## Ribosomal gene fraction
+
+```{r}
+plotColData(sce_object_mnn, x="cluster", y="subsets_Ribo_percent", colour_by = "vireo_assignment", other_fields = "vireo_assignment") +
+  labs(x = "Cluster", y = "Ribosomal UMI fraction") + scale_fill_manual(values=pals::tol(length(unique(sce_object_mnn$vireo_assignment))))
+```
+

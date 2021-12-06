@@ -1,0 +1,163 @@
+---
+title: "hiPSCi cell line evaluation (iPSC) - 07 Marker genes visualisation"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(igraph)
+library(dplyr)
+library(schex)
+library(wesanderson)
+library(ComplexHeatmap)
+library(circlize)
+library(pals)
+theme_set(theme_cowplot())
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+```{r}
+color_palette = c("#c4eadd",
+                  "#d098d7",
+                  "#dce496",
+                  "#bab5ff",
+                  "#f9d08b",
+                  "#5bb4ef",
+                  "#e1ad71",
+                  "#16c4e8",
+                  "#ffa3c6",
+                  "#4ec9b1",
+                  "#de9a98",
+                  "#22c0ba",
+                  "#ffbfb2",
+                  "#62be93",
+                  "#ffcfe0",
+                  "#c0ffdb",
+                  "#a5b17a",
+                  "#abebff",
+                  "#e0ffd0",
+                  "#9dc4b8",
+                  "#affff5")
+```
+
+For this experiment, we have 4 samples which have been multiplexed by genotype. We have two different pooling strategy used:
+
+ 1. Pool 1 and 2 conditions: The 8 ipsc lines were differentiated in separate wells (n=2, total of 16 wells) from day 1 to 18. On day 18 the cells were papain-dissociated and pooled the eight lines into one single tube (n=2) to proceed with 10x genomics experiment.
+ 2. Combined 1 and 2 conditions: The 8 ipsc lines were differentiated in separate wells (n=2, total of 16 wells) from day 1 to 3.  On day 3 the 8 lines were pooled into one well (n=2) and continue differentiation until day 18.  On day 17 the cells were papain-dissociated to proceed with 10x genomics experiment.
+
+- Sample Pool1: hNIL pool cell line 1-8 replicate 1
+- Sample Pool2: hNIL pool cell line 1-8 replicate 2
+- Sample Combined1: hNIL combined cell line 1-8 replicate 1
+- Sample Combined2: hNIL combined cell line 1-8 replicate 2
+
+# Marker genes visualisation
+
+```{r}
+merged_sce_object = readRDS("dc_cell.rds")
+# To properly perform batch correction, we need to remove doublets first
+merged_sce_object = merged_sce_object[, colData(merged_sce_object)$final_doublet_call == "Singlet"]
+
+sce_object_mnn = readRDS("clustered_cell.rds")
+```
+
+Let's now transfer the information from the sce object (with HVG genes only) to the full merged object (with all genes).
+
+```{r}
+# Rearrange the sce_object_mnn to match the ordering of merged_sce_object
+colnames(sce_object_mnn) = paste0(sce_object_mnn$Sample, ".", sce_object_mnn$Barcode)
+sce_object_mnn = sce_object_mnn[, paste0(merged_sce_object$Sample, ".", merged_sce_object$Barcode)]
+
+merged_sce_object$cluster = sce_object_mnn$cluster
+
+# Transfer the reducedDim representation and trim it to the first 2 dim only
+for (reduced_dim in names(reducedDims(sce_object_mnn))) {
+  reducedDim(merged_sce_object, reduced_dim) = reducedDim(sce_object_mnn, reduced_dim)[,c(1:2)]
+}
+
+merged_sce_object
+```
+
+## Curated marker genes
+
+Let's define the set of marker genes we will use. This is provided by Florian and is based on a core list of pluripotency markers, as well as markers which indicate differentiation potential as found in the paper by Anna on iPSC differentiation.
+
+```{r}
+pluripotency_markers = c("POU5F1", "SOX2", "NANOG", "KLF4", "FGF4", "UTF1", "TERT")
+differentiation_potential_markers = c("UTF1", "GBX2", "TFAP2C", "MT1F", "PITX2", "SIX6", "PRAC1", "SIX3", "IFITM1", "DSP", "MT2A", "TMSB4X", "BNIP3", "PDGFA", "ZIC1", "SP8", "UTF1", "SLC16A12", "LMO3", "KAT7", "VAT1L", "RPP25", "TMEM266", "LITAF", "TNRC18", "TAC3")
+curated_markers = rbind(data.frame(gene=pluripotency_markers, marker_type="pluripotency"),
+                        data.frame(gene=differentiation_potential_markers, marker_type="differentiation_potential"))
+```
+
+## Marker expression visualisation
+
+Let's calculate the schex representation of the UMAP for figures requiring expression plotted on UMAP.
+
+```{r, fig.width=5, fig.height=4}
+merged_sce_object = schex::make_hexbin(merged_sce_object, nbins=90, dimension_reduction="UMAP", use_dims=c(1,2))
+plot_hexbin_density(merged_sce_object)
+```
+
+Now let's visualise all the markers in (schex) UMAP plot. (Note that we will skip this due to the large number of markers present!)
+
+```{r}
+for (marker_name in unique(curated_markers$marker_type)) {
+  current_marker = intersect(curated_markers[curated_markers$marker_type == marker_name, c("gene")], rownames(merged_sce_object))
+  marker_plots = lapply(current_marker, function(x){
+    plotUMAP(merged_sce_object, colour_by=x) + theme(legend.key.size = unit(0.75, "line"), legend.position = "right")
+  })
+
+  ggsave(paste0("hypothalamic_differentiation_",marker_name,"_curated_markers_expression_overlay.png"), plot = plot_grid(plotlist = marker_plots, ncol=ifelse(length(current_marker) < 50, 4, 10)), 
+         width = ifelse(length(current_marker) < 50, 12, 40), height = 2.5*ceiling((length(current_marker)+3)/ifelse(length(current_marker) < 50, 4, 8)), units="in", limitsize = FALSE)
+}
+```
+
+Let's also visualise them as violin plot as this is a bit easier for comparison across clusters.
+
+```{r}
+for (marker_name in unique(curated_markers$marker_type)) {
+  current_marker = intersect(curated_markers[curated_markers$marker_type == marker_name, c("gene")], rownames(merged_sce_object))
+  per_line_plots = lapply(unique(merged_sce_object$vireo_assignment), function(line) {
+    plotExpression(merged_sce_object[, merged_sce_object$vireo_assignment == line], current_marker, point_size=0.5, theme_size=8) + ggtitle(paste0("Line: ",line))
+  })
+  
+  ggsave(paste0("iPSC_differentiation_",marker_name,"_curated_markers_expression_violin.png"), plot = plot_grid(plotlist = per_line_plots, ncol=1), width = 1*length(current_marker), height = 3*max(as.integer(merged_sce_object$vireo_assignment)), units="cm", limitsize = FALSE)
+}
+```
+
+Finally, let's visualise them in a heatmap (per line rather than per cell) as a way to also indicate similarity of the line based on the marker genes provided above.
+
+```{r}
+merged_sce_object_markers_mean = logcounts(aggregateAcrossCells(merged_sce_object[intersect(curated_markers$gene, rownames(merged_sce_object)), ], merged_sce_object$vireo_assignment, average=T, use_exprs_values="logcounts"))
+
+expressed_markers = rownames(merged_sce_object_markers_mean)[apply(merged_sce_object_markers_mean, 1, sum) > 0]
+merged_sce_object_markers_mean = merged_sce_object_markers_mean[expressed_markers,]
+
+scaled_merged_sce_object_markers_mean = pheatmap:::scale_rows(merged_sce_object_markers_mean)
+```
+
+```{r, fig.width=6, fig.height=8}
+merged_sce_object_markers_cor = cor(merged_sce_object_markers_mean, method="pearson")
+
+Heatmap(scaled_merged_sce_object_markers_mean, col=ocean.delta(100)[18:90], name="z-score", cluster_columns = hclust(as.dist(1-merged_sce_object_markers_cor)), clustering_distance_rows= "pearson", column_dend_height = unit(20, "mm"), row_dend_width = unit(20, "mm"), row_names_gp = gpar(fontsize = 6)) + 
+Heatmap(merged_sce_object_markers_mean, col=viridis(100), name="mean_logcounts", cluster_columns = hclust(as.dist(1-merged_sce_object_markers_cor)), clustering_distance_rows= "pearson", column_dend_height = unit(20, "mm"), row_dend_width = unit(20, "mm"), row_names_gp = gpar(fontsize = 6))
+```
+

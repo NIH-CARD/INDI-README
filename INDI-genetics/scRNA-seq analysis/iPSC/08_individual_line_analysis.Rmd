@@ -1,0 +1,223 @@
+---
+title: "hiPSCi cell line evaluation (iPSC) - 08 Inidividual line analysis"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=4, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, warning=FALSE}
+# Load required packages
+library(DropletUtils)
+library(Matrix)
+library(scater) 
+library(scran)
+library(BiocSingular)
+library(BiocParallel)
+library(pheatmap)
+library(plotly)
+library(batchelor)
+library(viridis)
+library(reshape2)
+library(SingleCellExperiment)
+library(cowplot)
+library(dplyr)
+library(igraph)
+library(leiden)
+library(Seurat)
+theme_set(theme_cowplot())
+ncores = 3
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+```
+
+```{r}
+color_palette = c("#c4eadd",
+                  "#d098d7",
+                  "#dce496",
+                  "#bab5ff",
+                  "#f9d08b",
+                  "#5bb4ef",
+                  "#e1ad71",
+                  "#16c4e8",
+                  "#ffa3c6",
+                  "#4ec9b1",
+                  "#de9a98",
+                  "#22c0ba",
+                  "#ffbfb2",
+                  "#62be93",
+                  "#ffcfe0",
+                  "#c0ffdb",
+                  "#a5b17a",
+                  "#abebff",
+                  "#e0ffd0",
+                  "#9dc4b8",
+                  "#affff5")
+```
+
+For this experiment, we have 1 sample composed of all 8 iPSC cell line (undifferentiated) which have been multiplexed by genotype. 
+
+# Individual line analysis
+
+We want to see how heterogenous are the iPSC cell within a single cell line.
+
+## Feature selection
+
+Since we only have one iPSC samples, we do not need to do any batch correction, but we will still need to perform feature selection for dimensionality reduction and clustering.
+
+```{r}
+merged_sce_object = readRDS("dc_cell.rds")
+
+# To properly perform batch correction, we need to remove doublets first
+merged_sce_object = merged_sce_object[, colData(merged_sce_object)$final_doublet_call == "Singlet"]
+
+merged_sce_object_by_line = lapply(unique(colData(merged_sce_object)$vireo_assignment), function(line){
+  merged_sce_object[, colData(merged_sce_object)$vireo_assignment == line]
+})
+names(merged_sce_object_by_line) = unique(colData(merged_sce_object)$vireo_assignment)
+```
+
+For the modeling of gene-variance relationship, we will again remove MT and Ribosomal genes due to the issue we see during doublet detection.
+
+```{r, fig.height=3}
+set.seed(1000)
+non_mito_ribo_genes = rownames(merged_sce_object)[grep(pattern = "^(MT-|RP[LS]|MALAT1)", rownames(merged_sce_object), invert = TRUE)]
+
+dec_combined_by_line = lapply(merged_sce_object_by_line, function(sce_object){
+  modelGeneVar(sce_object, subset.row=non_mito_ribo_genes, block=sce_object$Sample)
+})
+hvg_combined_by_line = lapply(dec_combined_by_line, function(dec_object) getTopHVGs(dec_object))
+lengths(hvg_combined_by_line)
+```
+
+## Dimensionality reduction
+
+Let's now calculate the UMAP for the single dataset.
+
+```{r}
+set.seed(1000)
+merged_sce_object_by_line = lapply(1:length(merged_sce_object_by_line), function(i) {
+  sce_object = merged_sce_object_by_line[[i]]
+  hvg_combined = hvg_combined_by_line[[i]]
+  runPCA(sce_object, subset_row=hvg_combined)
+})
+names(merged_sce_object_by_line) = unique(colData(merged_sce_object)$vireo_assignment)
+
+merged_sce_object_by_line = lapply(merged_sce_object_by_line, function(sce_object) {
+  runUMAP(sce_object, ncomponents=2, dimred="PCA", spread = 1, min_dist = 0.4)
+})
+```
+
+## Clustering
+
+Let's also calculate the clusters for the single dataset.
+
+```{r}
+set.seed(1000)
+clusters_by_line = lapply(merged_sce_object_by_line, function(sce_object) {
+  snn_graph = buildSNNGraph(sce_object, use.dimred="PCA")
+  clusters = cluster_louvain(snn_graph)$membership
+  clusters
+})
+
+lapply(clusters_by_line, table)
+```
+
+
+```{r, fig.width=10, fig.height=5}
+merged_sce_object_by_line = lapply(1:length(merged_sce_object_by_line), function(i) {
+  sce_object = merged_sce_object_by_line[[i]]
+  clusters = clusters_by_line[[i]]
+  sce_object$cluster = as.factor(clusters)
+  sce_object
+})
+names(merged_sce_object_by_line) = unique(colData(merged_sce_object)$vireo_assignment)
+
+plot_grid(plotlist = lapply(1:length(merged_sce_object_by_line), function(i) {
+  sce_object = merged_sce_object_by_line[[i]]
+  line = names(merged_sce_object_by_line)[[i]]
+  plotUMAP(sce_object, colour_by="cluster", text_by="cluster") + scale_fill_manual(values = color_palette) + scale_color_manual(values = color_palette) + ggtitle(line)
+}), ncol=4)
+```
+
+Based on the UMAP, we don't really see much difference between cells of the same cell line, though we are still able to get around 2-3 clusters...
+
+## Cell cycle analysis
+
+One potential explanation for difference in cluster might be due to cell cycle. Let's try to assign cell cycle to each cell using Seurat cell cycle classifier
+
+### Conversion to Seurat object
+
+We will need to first convert the sce object to seurat object. After talking to Leah, we should be able to use `as.Seurat` function to convert the sce object directly **after** normalisation.
+
+```{r}
+(seurat_sce_object_by_line = lapply(merged_sce_object_by_line, as.Seurat))
+```
+
+### Loading cell cycle genes
+
+The cell cycle genes are automatically loaded by Seurat, based on paper by Tirosh et al, 2015.
+
+```{r}
+s_genes = cc.genes$s.genes
+g2m_genes = cc.genes$g2m.genes
+```
+
+Let's quickly check if the genes do appear in our dataset.
+
+```{r}
+paste("S phase genes:", length(intersect(rownames(merged_sce_object), s_genes)), "/", length(s_genes))
+paste("G2M phase genes:", length(intersect(rownames(merged_sce_object), g2m_genes)), "/", length(g2m_genes))
+```
+
+### Cell cyle scoring
+
+Let's do the cell cycle scoring now.
+
+```{r}
+seurat_sce_object_by_line = lapply(seurat_sce_object_by_line, CellCycleScoring, s_genes, g2m_genes, set.ident=T)
+```
+```{r}
+cell_cycle_score_by_line = lapply(seurat_sce_object_by_line, function(seurat_sce) as.data.frame(seurat_sce@meta.data)[,c("Sample", "Barcode", "S.Score", "G2M.Score", "Phase")])
+```
+
+Let's reassign this back to the sce_object
+
+```{r}
+merged_sce_object_by_line = lapply(1:length(merged_sce_object_by_line), function(i) {
+  sce_object = merged_sce_object_by_line[[i]]
+  cell_cycle_score = cell_cycle_score_by_line[[i]]
+  
+  colnames(sce_object) = sce_object$Barcode
+  rownames(cell_cycle_score) = cell_cycle_score$Barcode
+  
+  colData(sce_object) = cbind(colData(sce_object), cell_cycle_score[sce_object$Barcode, c("S.Score", "G2M.Score", "Phase")])
+  sce_object
+})
+unique(colData(merged_sce_object)$vireo_assignment)
+```
+
+Now let's replot the UMAP with cell cycle phase
+
+```{r, fig.width=10, fig.height=3}
+plot_grid(plotlist = c(lapply(1:length(merged_sce_object_by_line), function(i) {
+  sce_object = merged_sce_object_by_line[[i]]
+  line = names(merged_sce_object_by_line)[[i]]
+  plotUMAP(sce_object, colour_by="cluster", text_by="cluster") + scale_fill_manual(values = color_palette) + scale_color_manual(values = color_palette) + ggtitle(paste(line, "- cluster")) + theme(legend.position = "none")
+}),
+lapply(1:length(merged_sce_object_by_line), function(i) {
+  sce_object = merged_sce_object_by_line[[i]]
+  line = names(merged_sce_object_by_line)[[i]]
+  plotUMAP(sce_object, colour_by="Phase", text_by="Phase") + ggtitle(paste(line, "- cell cycle phase")) + theme(legend.position = "none")
+})), ncol=7)
+```
+
+So we can see that the clustering seems to be mostly driven by cell cycle phase!
+
+
+```{r}
+saveRDS(merged_sce_object_by_line, "sce_objects_by_line_cc.rds")
+```
+
+
