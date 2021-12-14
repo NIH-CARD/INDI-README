@@ -1,0 +1,87 @@
+```
+R
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(ggpubr)
+library(tidyverse)
+
+# all data
+GRS_data <- read.table("../WGS/INDI_WGS_WITH_UKB_AD_PD_CONTROLS.txt",header=T)
+
+meanGRS <- mean(GRS_data$AD_score)
+sdGRS <- sd(GRS_data$AD_score)
+GRS_data$AD_SCOREZ <- (GRS_data$AD_score - meanGRS)/sdGRS
+
+meanGRS <- mean(GRS_data$PD_score)
+sdGRS <- sd(GRS_data$PD_score)
+GRS_data$PD_SCOREZ <- (GRS_data$PD_score - meanGRS)/sdGRS
+
+# update phenotypes
+GRS_data_AD <- subset(GRS_data, GRS_data$PHENO == "AD" | GRS_data$PHENO == "CONTROL")
+GRS_data_AD$PHENO[GRS_data_AD$PHENO == "AD"] <- 2
+GRS_data_AD$PHENO[GRS_data_AD$PHENO == "CONTROL"] <- 1
+
+GRS_data_PD <- subset(GRS_data, GRS_data$PHENO == "PD" | GRS_data$PHENO == "CONTROL")
+GRS_data_PD$PHENO[GRS_data_PD$PHENO == "PD"] <- 2
+GRS_data_PD$PHENO[GRS_data_PD$PHENO == "CONTROL"] <- 1
+
+GRS_INDI <- GRS_data[ which(GRS_data$PHENO=="INDI"),]
+samples <- read.csv("WGS_key_NEW.csv", header=T)
+GRS_INDI$Line_ID <- samples$Line_ID[match(GRS_INDI$FID, samples$WGS_ID)]
+GRS_INDIv2 = GRS_INDI[-c(8),]
+
+### test figure
+pdf("INDI_GRS_AD_SCORE.pdf",width=3)
+p <- ggplot(GRS_data_AD, aes(x=as.factor(PHENO), y=AD_SCOREZ, fill=as.factor(PHENO))) + 
+  geom_violin()
+# Add boxplot
+p2 <- p+
+p2 + scale_fill_manual(values=c("grey", "black")) + theme_bw() + 
+labs(title="AD GRS - control vs AD",x="1 control, 2 AD case", y = "GRS Z-score") + theme(legend.position="none")
+dev.off()
+
+# start plotting real figure
+#-- AD
+AD <- ggplot(data=GRS_data_AD, aes(x=AD_SCOREZ, y=PHENO, fill=PHENO))
+AD <- AD + geom_violin(trim=FALSE)
+AD <- AD + scale_fill_manual(values=c("grey","black"))
+AD <- AD + geom_boxplot(width=0.25, fill="white" ) 
+AD <- AD + theme_classic()
+AD <- AD + theme(legend.position = "none")
+AD <- AD + labs(x="Alzheimers Genetic Risk Score", y="1 control, 2 AD case")
+AD <- AD + xlim(-5,5)
+AD
+#-- PD
+PD <- ggplot(data=GRS_data_PD, aes(y=PD_SCOREZ, x=PHENO, fill=PHENO))
+PD <- PD + geom_violin(trim=FALSE)
+PD <- PD + scale_fill_manual(values=c("grey","black"))
+PD <- PD + geom_boxplot(width=0.25, fill="white" )
+PD <- PD + theme_classic()
+PD <- PD + labs(x="1 control, 2 PD case", y="Parkinson's Genetic Risk Score")
+PD <- PD + theme(legend.position = "none")
+PD <- PD + ylim(-5,5)
+PD
+#-- INDI
+d <- ggplot(GRS_INDIv2, aes(AD_SCOREZ, PD_SCOREZ,  color= Line_ID))
+d <- d + geom_point(size=5)
+d <- d + scale_color_brewer(palette="Spectral")
+d <- d + labs(x="Alzheimers Genetic Risk Score", y="Parkinson's Genetic Risk Score")
+d <- d + ggtitle( "AD vs PD GRS")
+d <- d + theme_classic()
+d <- d + theme(plot.title = element_text(hjust = 0.5), legend.position = c(0.8,0.3))
+d <- d + xlim(-5,5)
+d <- d + ylim(-5,5)
+d
+
+ggarrange( d, AD,   ncol = 1, nrow = 2, heights = c(1,0.5),  align = "hv")
+
+# normal
+tiff(file=paste0("GRS_NEW_UKB_VIOLIN.tiff"), width=10, height=8, units="in",res=300, pointsize = 8)
+ggarrange(PD, d, NULL, AD,ncol = 2, nrow = 2, heights = c(1,0.25), widths= c(0.25,1), align = "hv")
+dev.off()
+
+png(file=paste0("GRS_NEW_UKB_VIOLIN.png"), width=10, height=8, units="in",res=300, pointsize = 8)
+ggarrange(PD, d, NULL, AD,ncol = 2, nrow = 2, heights = c(1,0.25), widths= c(0.25,1), align = "hv")
+dev.off()
+```
