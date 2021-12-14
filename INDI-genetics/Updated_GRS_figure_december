@@ -65,7 +65,8 @@ PD
 #-- INDI
 d <- ggplot(GRS_INDIv2, aes(AD_SCOREZ, PD_SCOREZ,  color= Line_ID))
 d <- d + geom_point(size=5)
-d <- d + scale_color_brewer(palette="Spectral")
+d <- d + scale_color_manual(values=c("#999999", "#5566AA", "#558866", "#AADDCC", "#DDCC66", "#99bb55", "#BB0011"))
+# old coloring => d <- d + scale_color_brewer(palette="Spectral")
 d <- d + labs(x="Alzheimers Genetic Risk Score", y="Parkinson's Genetic Risk Score")
 d <- d + ggtitle( "AD vs PD GRS")
 d <- d + theme_classic()
@@ -77,11 +78,11 @@ d
 ggarrange( d, AD,   ncol = 1, nrow = 2, heights = c(1,0.5),  align = "hv")
 
 # normal
-tiff(file=paste0("GRS_NEW_UKB_VIOLIN.tiff"), width=10, height=8, units="in",res=300, pointsize = 8)
+tiff(file=paste0("GRS_NEW_UKB_VIOLIN_colors.tiff"), width=10, height=8, units="in",res=300, pointsize = 8)
 ggarrange(PD, d, NULL, AD,ncol = 2, nrow = 2, heights = c(1,0.25), widths= c(0.25,1), align = "hv")
 dev.off()
 
-png(file=paste0("GRS_NEW_UKB_VIOLIN.png"), width=10, height=8, units="in",res=300, pointsize = 8)
+png(file=paste0("GRS_NEW_UKB_VIOLIN_colors.png"), width=10, height=8, units="in",res=300, pointsize = 8)
 ggarrange(PD, d, NULL, AD,ncol = 2, nrow = 2, heights = c(1,0.25), widths= c(0.25,1), align = "hv")
 dev.off()
 ```
