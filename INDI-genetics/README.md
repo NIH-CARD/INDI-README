@@ -10,8 +10,7 @@
 ---
 ### Quick Description:
 Code relevant to the manuscript "A reference induced pluripotent stem cell line for large-scale collaborative studies". Fastq and 
-vcf files available on ADWB: https://fair.addi.ad-
-datainitiative.org/#/data/datasets/a_reference_induced_pluripotent_stem_cell_line_for_large_scale_collaborative_studies
+vcf files available on ADWB: https://fair.addi.ad-datainitiative.org/#/data/datasets/a_reference_induced_pluripotent_stem_cell_line_for_large_scale_collaborative_studies
 
 ## topics included:
 
