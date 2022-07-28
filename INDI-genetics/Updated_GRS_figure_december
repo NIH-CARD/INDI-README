@@ -49,7 +49,7 @@ AD <- AD + scale_fill_manual(values=c("grey","black"))
 AD <- AD + geom_boxplot(width=0.25, fill="white" ) 
 AD <- AD + theme_classic()
 AD <- AD + theme(legend.position = "none")
-AD <- AD + labs(x="Alzheimers Genetic Risk Score", y="1 control, 2 AD case")
+AD <- AD + labs(x="Alzheimer's Disease Polygenic Risk Score", y="control, AD case")
 AD <- AD + xlim(-5,5)
 AD
 #-- PD
@@ -58,7 +58,7 @@ PD <- PD + geom_violin(trim=FALSE)
 PD <- PD + scale_fill_manual(values=c("grey","black"))
 PD <- PD + geom_boxplot(width=0.25, fill="white" )
 PD <- PD + theme_classic()
-PD <- PD + labs(x="1 control, 2 PD case", y="Parkinson's Genetic Risk Score")
+PD <- PD + labs(x="control, PD case", y="Parkinson's Disease Polygenic Risk Score")
 PD <- PD + theme(legend.position = "none")
 PD <- PD + ylim(-5,5)
 PD
@@ -67,7 +67,7 @@ d <- ggplot(GRS_INDIv2, aes(AD_SCOREZ, PD_SCOREZ,  color= Line_ID))
 d <- d + geom_point(size=5)
 d <- d + scale_color_manual(values=c("#999999", "#5566AA", "#558866", "#AADDCC", "#DDCC66", "#99bb55", "#BB0011"))
 # old coloring => d <- d + scale_color_brewer(palette="Spectral")
-d <- d + labs(x="Alzheimers Genetic Risk Score", y="Parkinson's Genetic Risk Score")
+d <- d + labs(x="Alzheimer's Disease Polygenic Risk Score", y="Parkinson's Disease Polygenic Risk Score")
 d <- d + ggtitle( "AD vs PD GRS")
 d <- d + theme_classic()
 d <- d + theme(plot.title = element_text(hjust = 0.5), legend.position = c(0.8,0.3))
@@ -78,11 +78,11 @@ d
 ggarrange( d, AD,   ncol = 1, nrow = 2, heights = c(1,0.5),  align = "hv")
 
 # normal
-tiff(file=paste0("GRS_NEW_UKB_VIOLIN_colors.tiff"), width=10, height=8, units="in",res=300, pointsize = 8)
+tiff(file=paste0("GRS_NEW_UKB_VIOLIN_colors_florian.tiff"), width=10, height=8, units="in",res=300, pointsize = 8)
 ggarrange(PD, d, NULL, AD,ncol = 2, nrow = 2, heights = c(1,0.25), widths= c(0.25,1), align = "hv")
 dev.off()
 
-png(file=paste0("GRS_NEW_UKB_VIOLIN_colors.png"), width=10, height=8, units="in",res=300, pointsize = 8)
+png(file=paste0("GRS_NEW_UKB_VIOLIN_colors_florian.png"), width=10, height=8, units="in",res=300, pointsize = 8)
 ggarrange(PD, d, NULL, AD,ncol = 2, nrow = 2, heights = c(1,0.25), widths= c(0.25,1), align = "hv")
 dev.off()
 ```
