@@ -3,7 +3,7 @@
 `INDI ❤️ Open Science 😍`
 
  - **Project:** Investigating INDI lines for genetic variants and scores
- - **Author(s):** Cornelis Blauwendraat, Caroline Pantazis, Mike Nalls
+ - **Author(s):** Cornelis Blauwendraat, Caroline Pantazis, Mike Nalls, Andrian Yang
  - **Date Last Updated:** March 2021
     - **Update Description:** Edits to README
 
